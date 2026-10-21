@@ -21,8 +21,18 @@ final class NewHomeOrder {
     }
 
     static Set<String> livePins(Set<String> pinned, List<String> installed) {
-        Set<String> result = new LinkedHashSet<>(pinned);
-        result.retainAll(installed);
+        return livePins(pinned, installed, Integer.MAX_VALUE);
+    }
+
+    /** Keeps installed pins only, and at most {@code max} of them (first wins). */
+    static Set<String> livePins(Set<String> pinned, List<String> installed, int max) {
+        Set<String> result = new LinkedHashSet<>();
+        if (max <= 0) return result;
+        for (String id : pinned) {
+            if (!installed.contains(id)) continue;
+            result.add(id);
+            if (result.size() >= max) break;
+        }
         return result;
     }
 

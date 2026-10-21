@@ -40,4 +40,13 @@ final class NewHomeStore {
     void savePins(Set<String> pins) {
         prefs.edit().putStringSet("pins", new HashSet<>(pins)).apply();
     }
+
+    /** Apps the owner moved into the More folder. */
+    Set<String> stashed() {
+        return new HashSet<>(prefs.getStringSet("stashed", Collections.emptySet()));
+    }
+
+    void saveStashed(Set<String> stashed) {
+        prefs.edit().putStringSet("stashed", new HashSet<>(stashed)).apply();
+    }
 }

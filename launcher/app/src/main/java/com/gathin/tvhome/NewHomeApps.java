@@ -31,7 +31,9 @@ final class NewHomeApps {
             Drawable loaded;
             try { loaded = info.loadIcon(pm); }
             catch (RuntimeException unavailable) { loaded = pm.getDefaultActivityIcon(); }
-            icon = loaded;
+            // mutate(): apps like Moonlight share a large adaptive icon; without a private
+            // copy, focus/bounds changes on one tile can invalidate siblings and reflow the grid.
+            icon = loaded == null ? pm.getDefaultActivityIcon() : loaded.mutate();
         }
     }
 

@@ -1,14 +1,13 @@
 package com.gathin.tvhome;
 
 import android.app.Activity;
-import android.app.ActivityNotFoundException;
 import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.graphics.drawable.GradientDrawable;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
 import android.media.tv.TvContract;
@@ -18,25 +17,27 @@ import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
+import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
-import android.text.TextUtils;
-import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
-import android.widget.GridLayout;
-import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
+import android.widget.ArrayAdapter;
+import android.widget.FrameLayout;
+import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.widget.FrameLayout;
+
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -44,11 +45,14 @@ import java.util.Map;
 import java.util.Set;
 
 /** A separate HOME page with the existing header and MiFlow-style app menu. */
-public final class NewMainActivity extends Activity {
+public final class NewMainActivity extends Activity implements NewHomeAdapter.Host {
     private static final int LAUNCHER_SETTINGS_REQUEST = 42;
+    /** The new home only pins one favourite; a later pin replaces the previous one. */
+    private static final int MAX_PINS = 1;
+    /** Default home shows this many rows; the last cell becomes "更多" after an app is stashed. */
+    private static final int HOME_ROWS = 2;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Map<String, NewHomeApps.Entry> apps = new HashMap<>();
-    private final Map<String, View> cards = new HashMap<>();
     private final BroadcastReceiver packages = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             if (movingId == null) reloadApps();
@@ -66,13 +70,11 @@ public final class NewMainActivity extends Activity {
 
     private Config config;
     private NewHomeStore store;
-    private GridLayout grid;
-    private ScrollView scroll;
+    private RecyclerView grid;
+    private NewHomeAdapter adapter;
     private TextView greeting;
     private TextView btnWifi;
-    private TextView count;
     private TextView title;
-    private TextView subtitle;
     private TextView hint;
     private View btnInputs;
     private View btnReorder;
@@ -83,11 +85,15 @@ public final class NewMainActivity extends Activity {
     private List<String> order = new ArrayList<>();
     private List<String> beforeMove;
     private Set<String> pinned = new HashSet<>();
+    /** Apps the owner put into More; they leave the two-row shelf until shown again. */
+    private Set<String> stashed = new HashSet<>();
     private String focusedId;
     private String movingId;
     private boolean chooseMove;
     private int columns;
     private float density;
+    private boolean sizing;
+    private AlertDialog moreDialog;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -102,12 +108,57 @@ public final class NewMainActivity extends Activity {
         SkyView sky = findViewById(R.id.sky);
         sky.setIntensity(config.skyIntensity);
         grid = findViewById(R.id.grid);
-        grid.setColumnCount(columns);
-        scroll = findViewById(R.id.newHomeScroll);
+        // Keep vertical scroll still while moving left/right on the same row. Edge rows
+        // (e.g. 影视仓 / Moonlight / 电视管家) are often 1–2 px past the padding box; the
+        // default focus scroll then jitters the whole grid up and down.
+        grid.setLayoutManager(new GridLayoutManager(this, columns) {
+            private int lastFocusPos = RecyclerView.NO_POSITION;
+
+            @Override
+            public boolean requestChildRectangleOnScreen(@NonNull RecyclerView parent, @NonNull View child,
+                    @NonNull Rect rect, boolean immediate, boolean focusedChildVisible) {
+                int pos = getPosition(child);
+                int cols = Math.max(1, getSpanCount());
+                boolean sameRow = lastFocusPos != RecyclerView.NO_POSITION
+                        && pos != RecyclerView.NO_POSITION
+                        && pos / cols == lastFocusPos / cols;
+                if (pos != RecyclerView.NO_POSITION) lastFocusPos = pos;
+
+                int slop = dp(2);
+                int parentLeft = parent.getPaddingLeft() - slop;
+                int parentTop = parent.getPaddingTop() - slop;
+                int parentRight = parent.getWidth() - parent.getPaddingRight() + slop;
+                int parentBottom = parent.getHeight() - parent.getPaddingBottom() + slop;
+                int childLeft = child.getLeft();
+                int childTop = child.getTop();
+                int childRight = child.getRight();
+                int childBottom = child.getBottom();
+
+                int dx = 0;
+                if (childLeft < parentLeft) dx = childLeft - parentLeft;
+                else if (childRight > parentRight) dx = childRight - parentRight;
+
+                int dy = 0;
+                if (!sameRow) {
+                    if (childTop < parentTop) dy = childTop - parentTop;
+                    else if (childBottom > parentBottom) dy = childBottom - parentBottom;
+                }
+
+                if (dx == 0 && dy == 0) return false;
+                if (immediate) parent.scrollBy(dx, dy);
+                else parent.smoothScrollBy(dx, dy);
+                return true;
+            }
+        });
+        grid.setHasFixedSize(true);
+        grid.setItemAnimator(null);
+        adapter = new NewHomeAdapter(this);
+        grid.setAdapter(adapter);
+        grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (r - l != or - ol) updateTileMetrics();
+        });
         greeting = findViewById(R.id.greeting);
-        count = findViewById(R.id.newHomeCount);
         title = findViewById(R.id.newHomeTitle);
-        subtitle = findViewById(R.id.newHomeSubtitle);
         hint = findViewById(R.id.newHomeHint);
         btnInputs = findViewById(R.id.btnInputs);
         btnWifi = findViewById(R.id.btnWifi);
@@ -130,9 +181,8 @@ public final class NewMainActivity extends Activity {
             if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
             if (key == KeyEvent.KEYCODE_DPAD_UP) return true;
             if (key != KeyEvent.KEYCODE_DPAD_DOWN) return false;
-            View selected = cards.get(focusedId);
-            if (selected == null && !order.isEmpty()) selected = cards.get(order.get(0));
-            return selected != null && selected.requestFocus();
+            String id = focusedId != null ? focusedId : (order.isEmpty() ? null : order.get(0));
+            return id != null && focusApp(id);
         };
         for (View button : new View[]{btnInputs, btnWifi, btnReorder, btnLibrary, btnSettings})
             button.setOnKeyListener(topKeys);
@@ -192,7 +242,7 @@ public final class NewMainActivity extends Activity {
         if (openLauncherSettingsIfAsked(intent)) return;
         cancelMove();
         chooseMove = false;
-        scroll.smoothScrollTo(0, 0);
+        grid.scrollToPosition(0);
         renderHome();
     }
 
@@ -205,10 +255,41 @@ public final class NewMainActivity extends Activity {
             renderHome();
         } else if (!order.isEmpty()) {
             focusedId = order.get(0);
-            View first = cards.get(focusedId);
-            if (first != null) first.requestFocus();
-            scroll.smoothScrollTo(0, 0);
+            focusApp(focusedId);
         }
+    }
+
+    @Override public Map<String, NewHomeApps.Entry> apps() { return apps; }
+    @Override public Set<String> pinned() { return pinned; }
+    @Override public float density() { return density; }
+
+    @Override public void onAppFocused(NewHomeApps.Entry app) {
+        focusedId = app.id;
+        showFocusedName(app.label);
+    }
+
+    @Override public void onAppClick(NewHomeApps.Entry app) {
+        if (movingId != null) finishMove();
+        else if (chooseMove) startMove(app.id);
+        else launch(app);
+    }
+
+    @Override public void onAppEdit(NewHomeApps.Entry app) {
+        if (movingId == null) edit(app);
+    }
+
+    @Override public boolean onAppKey(NewHomeApps.Entry app, int key, KeyEvent event) {
+        return onCardKey(app, key, event);
+    }
+
+    @Override public void onMoreFocused() {
+        focusedId = NewHomeAdapter.MORE_ID;
+        showFocusedName("更多");
+    }
+
+    @Override public void onMoreClick() {
+        if (movingId != null || chooseMove) return;
+        showMoreApps();
     }
 
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
@@ -248,81 +329,207 @@ public final class NewMainActivity extends Activity {
             apps.put(app.id, app);
             installed.add(app.id);
         }
-        Set<String> livePins = NewHomeOrder.livePins(store.pins(), installed);
+        Set<String> livePins = NewHomeOrder.livePins(store.pins(), installed, MAX_PINS);
         pinned = livePins;
         store.savePins(livePins);
         order = NewHomeOrder.reconcile(installed, store.order(), pinned);
         store.saveOrder(order);
+        Set<String> liveStash = new HashSet<>(store.stashed());
+        liveStash.retainAll(new HashSet<>(installed));
+        // A pinned favourite stays on the shelf, not in More.
+        liveStash.removeAll(pinned);
+        stashed = liveStash;
+        store.saveStashed(stashed);
         focusedId = restore;
         renderHome();
     }
 
     private void renderHome() {
         String restore = movingId != null ? movingId : focusedId;
-        grid.removeAllViews();
-        cards.clear();
-        title.setText(movingId == null ? "你的应用" : "移动应用");
-        count.setText(order.size() + " 个应用  /  " + pinned.size() + " 个置顶");
-        subtitle.setText(movingId != null ? "方向键调整同组位置，确定保存，返回取消。"
-                : chooseMove ? "选择一个应用并按确定，开始移动。" : "让喜爱的应用，触手可及。");
         hint.setText(movingId != null ? "移动模式 · 确定保存 · 返回取消"
                 : chooseMove ? "方向键选择 · 确定选择要移动的应用 · 返回退出"
                 : "方向键选择 · 确定打开 · 长按确定 / 菜单键编辑应用");
-        int usable = getResources().getConfiguration().screenWidthDp - 112 - 18;
-        int width = Math.max(68, usable / columns - 16);
-        for (String id : order) {
-            NewHomeApps.Entry app = apps.get(id);
-            if (app == null) continue;
-            LinearLayout card = new LinearLayout(this);
-            card.setOrientation(LinearLayout.VERTICAL);
-            card.setGravity(Gravity.CENTER);
-            card.setPadding(dp(8), dp(12), dp(8), dp(10));
-            card.setFocusable(true);
-            card.setFocusableInTouchMode(true);
-            card.setClickable(true);
-            card.setContentDescription(app.label + (pinned.contains(id) ? "，已置顶" : ""));
-            card.setBackground(glass(false));
-            ImageView icon = new ImageView(this);
-            icon.setImageDrawable(app.icon);
-            icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            card.addView(icon, new LinearLayout.LayoutParams(dp(54), dp(54)));
-            TextView label = new TextView(this);
-            label.setText((pinned.contains(id) ? "↑ " : "") + app.label);
-            label.setTextColor(0xFFF5F7FF);
-            label.setTextSize(13);
-            label.setSingleLine(true);
-            label.setEllipsize(TextUtils.TruncateAt.END);
-            label.setGravity(Gravity.CENTER);
-            label.setPadding(0, dp(10), 0, 0);
-            card.addView(label, new LinearLayout.LayoutParams(-1, -2));
-            card.setOnFocusChangeListener((view, focused) -> {
-                if (focused) focusedId = id;
-                view.setBackground(glass(focused));
-                label.setTextColor(focused ? 0xFF17213B : 0xFFF5F7FF);
-                view.animate().scaleX(focused ? 1.08f : 1f).scaleY(focused ? 1.08f : 1f)
-                        .translationZ(focused ? dp(12) : 0).setDuration(160).start();
-            });
-            card.setOnClickListener(view -> {
-                if (movingId != null) finishMove();
-                else if (chooseMove) startMove(id);
-                else launch(app);
-            });
-            card.setOnLongClickListener(view -> {
-                if (movingId == null) edit(app);
-                return true;
-            });
-            card.setOnKeyListener((view, key, event) -> onCardKey(app, key, event));
-            GridLayout.LayoutParams params = new GridLayout.LayoutParams();
-            params.width = dp(width);
-            params.height = dp(116);
-            params.setMargins(dp(8), dp(8), dp(8), dp(8));
-            grid.addView(card, params);
-            cards.put(id, card);
+        List<String> visible = visibleOrder();
+        adapter.submit(visible);
+        updateTileMetrics();
+        if (visible.isEmpty()) {
+            showFocusedName(null);
+            btnSettings.requestFocus();
+            return;
         }
-        View selected = cards.get(restore);
-        if (selected == null && !order.isEmpty()) selected = cards.get(order.get(0));
-        if (selected != null) selected.requestFocus();
-        else btnSettings.requestFocus();
+        String target;
+        if (restore != null && visible.contains(restore)) target = restore;
+        else if (restore != null && moreOrder().contains(restore)
+                && visible.contains(NewHomeAdapter.MORE_ID))
+            target = NewHomeAdapter.MORE_ID;
+        else target = visible.get(0);
+        grid.post(() -> {
+            if (!focusApp(target)) {
+                showFocusedName(null);
+                btnSettings.requestFocus();
+            }
+        });
+    }
+
+    /** Apps still on the two-row shelf (not put into More). */
+    private List<String> shelfOrder() {
+        List<String> shelf = new ArrayList<>();
+        for (String id : order) if (!stashed.contains(id)) shelf.add(id);
+        return shelf;
+    }
+
+    /** Two-row shelf; More appears only after the owner has stashed at least one app. */
+    private List<String> visibleOrder() {
+        if (movingId != null || chooseMove) return new ArrayList<>(order);
+        List<String> shelf = shelfOrder();
+        int slots = columns * HOME_ROWS;
+        if (stashed.isEmpty()) {
+            // No stashed apps yet: fill both rows, do not show More.
+            if (shelf.size() <= slots) return shelf;
+            return new ArrayList<>(shelf.subList(0, slots));
+        }
+        int keep = Math.max(0, slots - 1);
+        List<String> visible = new ArrayList<>(shelf.subList(0, Math.min(keep, shelf.size())));
+        visible.add(NewHomeAdapter.MORE_ID);
+        return visible;
+    }
+
+    /** Stashed apps, plus shelf apps that no longer fit once More takes a cell. */
+    private List<String> moreOrder() {
+        if (stashed.isEmpty()) return Collections.emptyList();
+        List<String> shelf = shelfOrder();
+        int keep = Math.max(0, columns * HOME_ROWS - 1);
+        List<String> more = new ArrayList<>();
+        if (shelf.size() > keep) more.addAll(shelf.subList(keep, shelf.size()));
+        for (String id : order) {
+            if (stashed.contains(id) && !more.contains(id)) more.add(id);
+        }
+        return more;
+    }
+
+    private void showMoreApps() {
+        List<String> more = moreOrder();
+        if (more.isEmpty()) return;
+        if (moreDialog != null && moreDialog.isShowing()) moreDialog.dismiss();
+        List<String> labels = new ArrayList<>(more.size());
+        for (String id : more) {
+            NewHomeApps.Entry app = apps.get(id);
+            labels.add(app == null ? id : app.label);
+        }
+        ListView list = new ListView(this);
+        list.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, labels));
+        moreDialog = new AlertDialog.Builder(this)
+                .setTitle("更多应用")
+                .setView(list)
+                .create();
+        list.setOnItemClickListener((parent, view, which, rowId) -> {
+            NewHomeApps.Entry app = apps.get(more.get(which));
+            if (app == null) return;
+            moreDialog.dismiss();
+            launch(app);
+        });
+        list.setOnItemLongClickListener((parent, view, which, rowId) -> {
+            NewHomeApps.Entry app = apps.get(more.get(which));
+            if (app != null) editMore(app);
+            return true;
+        });
+        moreDialog.setOnDismissListener(d -> moreDialog = null);
+        moreDialog.show();
+        list.post(list::requestFocus);
+    }
+
+    /** Long-press actions inside More: put back on the shelf, or open app info. */
+    private void editMore(NewHomeApps.Entry app) {
+        new AlertDialog.Builder(this).setTitle(app.label)
+                .setItems(new String[]{"展示", "应用信息"}, (dialog, which) -> {
+                    if (which == 0) showOnHome(app);
+                    else open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:" + app.packageName)));
+                }).show();
+    }
+
+    /**
+     * Puts a More-folder app back on the two-row shelf. If the shelf is already full,
+     * ask the owner to stash something first instead of silently overflowing.
+     */
+    private void showOnHome(NewHomeApps.Entry app) {
+        boolean wasStashed = stashed.contains(app.id);
+        if (wasStashed) {
+            int slots = columns * HOME_ROWS;
+            int shelfAfter = shelfOrder().size() + 1;
+            int stashedAfter = stashed.size() - 1;
+            int homeAppSlots = stashedAfter > 0 ? slots - 1 : slots;
+            if (shelfAfter > homeAppSlots) {
+                new AlertDialog.Builder(this)
+                        .setMessage("首页两行已满，请先收纳一个应用后再展示")
+                        .setPositiveButton("知道了", null)
+                        .show();
+                return;
+            }
+            stashed.remove(app.id);
+            store.saveStashed(stashed);
+        } else {
+            // Capacity overflow: promote it to the front of the shelf without growing the count.
+            order.remove(app.id);
+            int insert = 0;
+            while (insert < order.size() && pinned.contains(order.get(insert))) insert++;
+            order.add(insert, app.id);
+            store.saveOrder(order);
+        }
+        if (moreDialog != null) moreDialog.dismiss();
+        focusedId = app.id;
+        renderHome();
+    }
+
+    private void updateTileMetrics() {
+        int available = grid.getWidth() - grid.getPaddingLeft() - grid.getPaddingRight();
+        if (available <= 0) {
+            if (!sizing) {
+                sizing = true;
+                grid.post(() -> {
+                    sizing = false;
+                    updateTileMetrics();
+                });
+            }
+            available = dp(getResources().getConfiguration().screenWidthDp - 112);
+        }
+        int gap = Math.max(dp(5), Math.round(available * 0.012f));
+        int width = Math.max(dp(54), available / columns - gap * 2);
+        int iconSize = Math.max(dp(32), Math.round(width * 0.8f));
+        adapter.setMetrics(width, iconSize, gap);
+        // One row only: sit on the bottom row of the two-row shelf (pad one row above).
+        int baseV = dp(16);
+        int count = adapter.getItemCount();
+        int top = (count > 0 && count <= columns) ? baseV + width + gap * 2 : baseV;
+        if (grid.getPaddingTop() != top || grid.getPaddingBottom() != baseV) {
+            grid.setPadding(grid.getPaddingLeft(), top, grid.getPaddingRight(), baseV);
+        }
+        // Line the title up with the first tile's left edge (list padding + cell margin).
+        int edge = grid.getPaddingLeft() + gap;
+        title.setPaddingRelative(edge, title.getPaddingTop(), edge, title.getPaddingBottom());
+    }
+
+    private boolean focusApp(String id) {
+        int pos = adapter.indexOf(id);
+        if (pos < 0) return false;
+        grid.scrollToPosition(pos);
+        RecyclerView.ViewHolder holder = grid.findViewHolderForAdapterPosition(pos);
+        if (holder != null) return holder.itemView.requestFocus();
+        grid.post(() -> {
+            RecyclerView.ViewHolder again = grid.findViewHolderForAdapterPosition(pos);
+            if (again != null) again.itemView.requestFocus();
+        });
+        return true;
+    }
+
+    /** The focused app's name replaces the static "你的应用" heading above the grid. */
+    private void showFocusedName(String label) {
+        if (movingId != null) {
+            NewHomeApps.Entry moving = apps.get(movingId);
+            title.setText(moving == null ? "移动应用" : moving.label);
+            return;
+        }
+        title.setText(label == null || label.isEmpty() ? "你的应用" : label);
     }
 
     private boolean onCardKey(NewHomeApps.Entry app, int key, KeyEvent event) {
@@ -358,16 +565,32 @@ public final class NewMainActivity extends Activity {
 
     private void edit(NewHomeApps.Entry app) {
         new AlertDialog.Builder(this).setTitle(app.label)
-                .setItems(new String[]{pinned.contains(app.id) ? "取消置顶" : "置顶", "移动位置", "应用信息"},
+                .setItems(new String[]{
+                                pinned.contains(app.id) ? "取消置顶" : "置顶",
+                                "收纳",
+                                "移动位置",
+                                "应用信息"},
                         (dialog, which) -> {
                             if (which == 0) {
-                                if (!pinned.remove(app.id)) pinned.add(app.id);
+                                if (!pinned.remove(app.id)) {
+                                    pinned.clear();
+                                    pinned.add(app.id);
+                                    stashed.remove(app.id);
+                                    store.saveStashed(stashed);
+                                }
                                 store.savePins(pinned);
                                 order = NewHomeOrder.reconcile(order, order, pinned);
                                 store.saveOrder(order);
                                 focusedId = app.id;
                                 renderHome();
                             } else if (which == 1) {
+                                stashed.add(app.id);
+                                pinned.remove(app.id);
+                                store.savePins(pinned);
+                                store.saveStashed(stashed);
+                                focusedId = NewHomeAdapter.MORE_ID;
+                                renderHome();
+                            } else if (which == 2) {
                                 startMove(app.id);
                             } else {
                                 open(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
@@ -396,15 +619,6 @@ public final class NewMainActivity extends Activity {
         order = beforeMove;
         movingId = null;
         beforeMove = null;
-    }
-
-    private GradientDrawable glass(boolean focused) {
-        GradientDrawable surface = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                focused ? new int[]{0xFFF7FAFF, 0xFFDBE7FF}
-                        : new int[]{0x38FFFFFF, 0x10FFFFFF});
-        surface.setCornerRadius(dp(20));
-        surface.setStroke(dp(1), focused ? 0xFFFFFFFF : 0x55FFFFFF);
-        return surface;
     }
 
     private int dp(float value) { return Math.round(value * density); }
