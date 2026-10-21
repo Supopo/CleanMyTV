@@ -23,6 +23,11 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             // Sideloaded over ADB, never published: sign with the debug key so it installs over a debug build.
             signingConfig signingConfigs.debug
+            // Many TVs reject Studio's release install when AGP ships a baseline profile alongside the APK
+            // (INSTALL_BASELINE_PROFILE_FAILED / "location is error"). Sideload does not need it.
+            installation {
+                enableBaselineProfile false
+            }
         }
     }
 
