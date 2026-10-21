@@ -324,6 +324,10 @@ and do not rewrite the enabled-services list or grant app-ops as a blanket fix. 
 TV 12) the line is `[TclAppBoot] ... calleeComponent = 'com.gathin.tvhome/.HomeKeyService', bootType =
 'bind_service', isAllow = 'false', reason = 'callee_does't_have_OP_AUTO_START_permission.'`, and
 `appops get com.gathin.tvhome` shows `APP_AUTO_START: ignore`. Allowing that one op for the launcher only
-(`appops set com.gathin.tvhome APP_AUTO_START allow`) made the service bind on its own after a restart;
-toggling the service off and on in Accessibility works until the next restart. When reporting, give the
+and saving it (`appops set com.gathin.tvhome APP_AUTO_START allow; appops write-settings`) made the service
+bind on its own after a restart; toggling the service off and on in Accessibility works until the next
+restart. App-ops reach the disk lazily: without `write-settings`, a restart soon after the `set` drops the
+change and the denial is back. Seen on a TCL C89B (Google TV 14, `G08`, `UTT2.250416.001 AU02`), whose log
+reads `[TclAppBoot]:forbid bind service ComponentInfo{com.gathin.tvhome/com.gathin.tvhome.HomeKeyService}`
+and whose `appops get` names the op `AUTO_START`: use the name `appops get` prints. When reporting, give the
 model, build, current user and the relevant redacted lines, not the raw dump.
