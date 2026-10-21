@@ -1,11 +1,16 @@
 package com.gathin.tvhome;
 
-import android.graphics.drawable.Drawable;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ResolveInfo;
+import android.graphics.Outline;
 import android.graphics.drawable.GradientDrawable;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 
@@ -22,6 +27,12 @@ import java.util.Set;
 final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
     /** Sentinel id for the "More" tile that opens overflow apps. */
     static final String MORE_ID = "newhome:more";
+    /** Focused icon grows a little so the selection reads without a tile frame. */
+    private static final float FOCUS_SCALE = 1.18f;
+    /** Corner radius as a fraction of the icon edge so every tile matches. */
+    private static final float ICON_CORNER = 0.22f;
+    /** Shared icon / More-plate opacity (~80%). */
+    private static final int ICON_ALPHA = 0xCC;
 
     interface Host {
         Map<String, NewHomeApps.Entry> apps();
@@ -33,6 +44,8 @@ final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
         boolean onAppKey(NewHomeApps.Entry app, int key, KeyEvent event);
         void onMoreFocused();
         void onMoreClick();
+        /** D-pad within the shelf; return true if the press was handled (including blocked edges). */
+        boolean onShelfKey(int position, int key, KeyEvent event);
     }
 
     private final Host host;
@@ -40,6 +53,8 @@ final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
     private int tileSize;
     private int iconSize;
     private int gap;
+    /** Package that resolves {@link Settings#ACTION_SETTINGS}, if any. */
+    private static String settingsPackage;
 
     NewHomeAdapter(Host host) {
         this.host = host;
@@ -84,14 +99,25 @@ final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
         card.setFocusable(true);
         card.setFocusableInTouchMode(true);
         card.setClickable(true);
+        card.setBackground(null);
         ImageView icon = new ImageView(parent.getContext());
-        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
         icon.setAdjustViewBounds(false);
         icon.setCropToPadding(false);
-        int pad = Math.round(6 * host.density());
-        icon.setPadding(pad, pad, pad, pad);
+        icon.setClipToOutline(true);
+        icon.setOutlineProvider(new ViewOutlineProvider() {
+            @Override public void getOutline(View view, Outline outline) {
+                int w = view.getWidth(), h = view.getHeight();
+                if (w <= 0 || h <= 0) {
+                    outline.setEmpty();
+                    return;
+                }
+                float radius = Math.min(w, h) * ICON_CORNER;
+                outline.setRoundRect(0, 0, w, h, radius);
+            }
+        });
         card.addView(icon, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
         card.setLayoutParams(new RecyclerView.LayoutParams(
                 Math.max(tileSize, 1), Math.max(tileSize, 1)));
         Holder holder = new Holder(card, icon);
@@ -106,10 +132,7 @@ final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
                     if (app != null) host.onAppFocused(app);
                 }
             }
-            view.setBackground(glass(focused, host.density()));
-            view.animate().cancel();
-            view.animate().scaleX(focused ? 1.08f : 1f).scaleY(focused ? 1.08f : 1f)
-                    .translationZ(focused ? 10 * host.density() : 0).setDuration(160).start();
+            animateIcon(holder.icon, focused);
         });
         card.setOnClickListener(view -> {
             int pos = holder.getBindingAdapterPosition();
@@ -133,6 +156,7 @@ final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
         card.setOnKeyListener((view, key, event) -> {
             int pos = holder.getBindingAdapterPosition();
             if (pos == RecyclerView.NO_POSITION) return false;
+            if (host.onShelfKey(pos, key, event)) return true;
             String id = order.get(pos);
             if (isMore(id)) return false;
             NewHomeApps.Entry app = host.apps().get(id);
@@ -156,36 +180,126 @@ final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
             params.height = size;
         }
         params.setMargins(inset, inset, inset, inset);
+        holder.itemView.setBackground(null);
         FrameLayout.LayoutParams iconParams = (FrameLayout.LayoutParams) holder.icon.getLayoutParams();
         iconParams.width = iconPx;
         iconParams.height = iconPx;
         iconParams.gravity = Gravity.CENTER;
         holder.icon.setLayoutParams(iconParams);
+        holder.icon.invalidateOutline();
 
-        Drawable drawable;
         if (isMore(id)) {
             holder.itemView.setContentDescription("更多");
-            drawable = holder.itemView.getResources().getDrawable(R.drawable.ic_apps, null);
+            // Opaque plate; overall fade is View alpha (setImageAlpha is flaky on some OEM icons).
+            applySoftPlate(holder.icon, iconPx, Math.max(iconPx / 4, Math.round(10 * host.density())), true);
+            holder.icon.setImageResource(R.drawable.ic_more);
         } else {
             NewHomeApps.Entry app = host.apps().get(id);
-            if (app == null) return;
-            boolean pinned = host.pinned().contains(id);
-            holder.itemView.setContentDescription(app.label + (pinned ? "，已置顶" : ""));
-            drawable = app.icon;
+            if (app == null) {
+                holder.icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                holder.icon.setPadding(0, 0, 0, 0);
+                holder.icon.setBackground(null);
+                holder.icon.setImageDrawable(null);
+            } else {
+                boolean pinned = host.pinned().contains(id);
+                holder.itemView.setContentDescription(app.label + (pinned ? "，已置顶" : ""));
+                // Middle-menu Settings app only (not the top-bar Settings pill).
+                if (isSettingsApp(app, holder.itemView.getContext())) {
+                    styleSettingsIcon(holder.icon, app, iconPx, host.density());
+                } else {
+                    holder.icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    holder.icon.setPadding(0, 0, 0, 0);
+                    holder.icon.setBackground(null);
+                    holder.icon.setImageDrawable(app.icon);
+                }
+            }
         }
-        holder.icon.setImageDrawable(drawable);
-        holder.itemView.setBackground(glass(holder.itemView.isFocused(), host.density()));
-        holder.itemView.setScaleX(holder.itemView.isFocused() ? 1.08f : 1f);
-        holder.itemView.setScaleY(holder.itemView.isFocused() ? 1.08f : 1f);
+        // Every tile (More / Settings / apps, both rows) gets the same overall fade.
+        applyIconAlpha(holder.icon);
+        float scale = holder.itemView.isFocused() ? FOCUS_SCALE : 1f;
+        holder.icon.setScaleX(scale);
+        holder.icon.setScaleY(scale);
     }
 
-    private static GradientDrawable glass(boolean focused, float density) {
-        GradientDrawable surface = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                focused ? new int[]{0xFFF7FAFF, 0xFFDBE7FF}
-                        : new int[]{0x38FFFFFF, 0x10FFFFFF});
-        surface.setCornerRadius(20 * density);
-        surface.setStroke(Math.max(1, Math.round(density)), focused ? 0xFFFFFFFF : 0x55FFFFFF);
-        return surface;
+    private static void applyIconAlpha(ImageView icon) {
+        icon.setImageAlpha(0xFF);
+        icon.setAlpha(ICON_ALPHA / 255f);
+    }
+
+    private static void applySoftPlate(ImageView icon, int size, int pad, boolean opaque) {
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setPadding(pad, pad, pad, pad);
+        icon.setBackground(softPlate(size, opaque));
+    }
+
+    /** Frosted plate for More; no stroke. */
+    private static GradientDrawable softPlate(int size, boolean opaque) {
+        int soft = opaque ? 0xFFF2F5FA : (ICON_ALPHA << 24) | 0x00FFFFFF;
+        int softer = opaque ? 0xFFDDE3EE : (0x28 << 24) | 0x00FFFFFF;
+        GradientDrawable plate = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{soft, softer});
+        plate.setCornerRadius(size * ICON_CORNER);
+        return plate;
+    }
+
+    /** Solid rounded background for the Settings app icon; no stroke. */
+    static GradientDrawable roundedIconBackground(int size) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.RECTANGLE);
+        bg.setColor(0xFFE8EEF6);
+        bg.setCornerRadius(size * ICON_CORNER);
+        return bg;
+    }
+
+    /** Rounded plate + inset glyph for Settings on the home grid and in More. */
+    static void styleSettingsIcon(ImageView icon, NewHomeApps.Entry app, int iconPx, float density) {
+        int pad = Math.max(iconPx / 5, Math.round(8 * density));
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setPadding(pad, pad, pad, pad);
+        icon.setBackground(roundedIconBackground(iconPx));
+        icon.setImageDrawable(app.icon);
+    }
+
+    /** Clears Settings chrome when binding a normal app icon. */
+    static void clearSettingsIconStyle(ImageView icon) {
+        icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        icon.setPadding(0, 0, 0, 0);
+        icon.setBackground(null);
+    }
+
+    /** True for the system Settings tile that appears in the app grid / More. */
+    static boolean isSettingsApp(NewHomeApps.Entry app, Context context) {
+        if (app == null) return false;
+        String label = app.label == null ? "" : app.label.trim();
+        if ("设置".equals(label) || "系统设置".equals(label) || "电视设置".equals(label)
+                || "Settings".equalsIgnoreCase(label)
+                || "TV settings".equalsIgnoreCase(label)
+                || "System settings".equalsIgnoreCase(label)) {
+            return true;
+        }
+        String pkg = app.packageName == null ? "" : app.packageName;
+        String cls = app.component == null ? "" : app.component.getClassName();
+        if (pkg.equals("com.android.settings")
+                || pkg.equals("com.android.tv.settings")
+                || pkg.equals("com.xiaomi.mitv.settings")
+                || pkg.endsWith(".tv.settings")
+                || pkg.endsWith(".tvsettings")
+                || cls.contains("mitv.settings")) {
+            return true;
+        }
+        if (settingsPackage == null) {
+            ResolveInfo info = context.getPackageManager()
+                    .resolveActivity(new Intent(Settings.ACTION_SETTINGS), 0);
+            settingsPackage = info != null && info.activityInfo != null
+                    ? info.activityInfo.packageName : "";
+        }
+        return !settingsPackage.isEmpty() && settingsPackage.equals(pkg);
+    }
+
+    private static void animateIcon(View icon, boolean focused) {
+        icon.animate().cancel();
+        float scale = focused ? FOCUS_SCALE : 1f;
+        icon.animate().scaleX(scale).scaleY(scale).setDuration(160).start();
     }
 
     static final class Holder extends RecyclerView.ViewHolder {

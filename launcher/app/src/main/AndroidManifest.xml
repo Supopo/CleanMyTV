@@ -35,7 +35,7 @@
     </queries>
 
     <application
-        android:label="@string/app_name"
+        android:label="@string/launcher_name"
         android:icon="@mipmap/ic_launcher"
         android:banner="@drawable/banner"
         android:theme="@style/Theme.TvHome"
@@ -66,12 +66,21 @@
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
-            <!-- Listed in the TV's own app list, so it can be opened from the stock home screen too. -->
+        </activity>
+        <!-- Separate app-list entry so the stock launcher can show this HOME app as an installed app. -->
+        <activity-alias
+            android:name=".AppEntryActivity"
+            android:targetActivity=".NewMainActivity"
+            android:label="@string/launcher_name"
+            android:icon="@mipmap/ic_launcher"
+            android:banner="@drawable/banner"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
 
         <activity
             android:name=".LauncherSettingsActivity"
