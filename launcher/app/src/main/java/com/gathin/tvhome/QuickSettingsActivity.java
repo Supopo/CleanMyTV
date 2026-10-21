@@ -32,7 +32,7 @@ public final class QuickSettingsActivity extends Activity {
                 new Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS));
         // Through Home, so it rebuilds with the new choices when Launcher settings closes.
         addRow(rows, R.drawable.ic_home_settings, R.string.launcher_settings, 0,
-                new Intent(this, MainActivity.class).setAction(MainActivity.ACTION_LAUNCHER_SETTINGS));
+                new Intent(this, NewMainActivity.class).setAction(MainActivity.ACTION_LAUNCHER_SETTINGS));
         rows.getChildAt(0).requestFocus();
     }
 
