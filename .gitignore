@@ -8,6 +8,9 @@ launcher/local.properties
 launcher/.idea/
 # your own TV's dumps (serial, android_id, device names) stay local
 backup/
+# session screenshots and working notes (may show the Wi-Fi name or account avatar) stay local
+shots/
+work/
 .DS_Store
 
 # Generated install bundles and JVM crash reports stay out of contributions.

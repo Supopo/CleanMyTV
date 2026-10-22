@@ -32,7 +32,8 @@ jobs:
        startsWith(github.event.comment.body, '/bot review') &&
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    # A single PR review gets 30 minutes; the backfill (workflow_dispatch) keeps 5 hours.
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 300 || 30 }}
     steps:
       - id: day
         run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
@@ -41,7 +42,7 @@ jobs:
           path: .maintainer-bot
           key: maintainer-bot-ledger-${{ steps.day.outputs.day }}-${{ github.run_id }}
           restore-keys: maintainer-bot-ledger-${{ steps.day.outputs.day }}-
-      - uses: Gathin23/maintainer-bot@c1a63e955797bdf5e8467f947a3e49d21e0caa06 # maintainer-bot master, pinned
+      - uses: Gathin23/maintainer-bot@b303f262f227702d8953ad4785eaa326d0bb9276 # maintainer-bot live-fix, pinned
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           og-pc-api-key: ${{ secrets.OG_PC_API_KEY }}
