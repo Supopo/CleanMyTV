@@ -27,6 +27,10 @@ import java.util.Set;
 final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
     /** Sentinel id for the "More" tile that opens overflow apps. */
     static final String MORE_ID = "newhome:more";
+    /** Invisible spacer used to push real tiles onto the bottom row first. */
+    private static final String EMPTY_PREFIX = "newhome:empty:";
+    private static final int TYPE_TILE = 0;
+    private static final int TYPE_EMPTY = 1;
     /** Focused icon grows a little so the selection reads without a tile frame. */
     private static final float FOCUS_SCALE = 1.18f;
     /** Corner radius as a fraction of the icon edge so every tile matches. */
@@ -86,6 +90,18 @@ final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
         return MORE_ID.equals(id);
     }
 
+    static boolean isEmpty(String id) {
+        return id != null && id.startsWith(EMPTY_PREFIX);
+    }
+
+    static String emptyId(int slot) {
+        return EMPTY_PREFIX + slot;
+    }
+
+    @Override public int getItemViewType(int position) {
+        return isEmpty(idAt(position)) ? TYPE_EMPTY : TYPE_TILE;
+    }
+
     @Override public long getItemId(int position) {
         String id = idAt(position);
         return id == null ? RecyclerView.NO_ID : id.hashCode();
@@ -96,14 +112,26 @@ final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
     @NonNull @Override
     public Holder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         FrameLayout card = new FrameLayout(parent.getContext());
-        card.setFocusable(true);
-        card.setFocusableInTouchMode(true);
-        card.setClickable(true);
         card.setBackground(null);
+        card.setLayoutParams(new RecyclerView.LayoutParams(
+                Math.max(tileSize, 1), Math.max(tileSize, 1)));
         ImageView icon = new ImageView(parent.getContext());
         icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
         icon.setAdjustViewBounds(false);
         icon.setCropToPadding(false);
+        card.addView(icon, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        Holder holder = new Holder(card, icon);
+        if (viewType == TYPE_EMPTY) {
+            card.setFocusable(false);
+            card.setClickable(false);
+            card.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            icon.setVisibility(View.INVISIBLE);
+            return holder;
+        }
+        card.setFocusable(true);
+        card.setFocusableInTouchMode(true);
+        card.setClickable(true);
         icon.setClipToOutline(true);
         icon.setOutlineProvider(new ViewOutlineProvider() {
             @Override public void getOutline(View view, Outline outline) {
@@ -116,15 +144,11 @@ final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
                 outline.setRoundRect(0, 0, w, h, radius);
             }
         });
-        card.addView(icon, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
-        card.setLayoutParams(new RecyclerView.LayoutParams(
-                Math.max(tileSize, 1), Math.max(tileSize, 1)));
-        Holder holder = new Holder(card, icon);
         card.setOnFocusChangeListener((view, focused) -> {
             int pos = holder.getBindingAdapterPosition();
             if (pos == RecyclerView.NO_POSITION) return;
             String id = order.get(pos);
+            if (isEmpty(id)) return;
             if (focused) {
                 if (isMore(id)) host.onMoreFocused();
                 else {
@@ -138,6 +162,7 @@ final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
             int pos = holder.getBindingAdapterPosition();
             if (pos == RecyclerView.NO_POSITION) return;
             String id = order.get(pos);
+            if (isEmpty(id)) return;
             if (isMore(id)) host.onMoreClick();
             else {
                 NewHomeApps.Entry app = host.apps().get(id);
@@ -148,7 +173,7 @@ final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
             int pos = holder.getBindingAdapterPosition();
             if (pos == RecyclerView.NO_POSITION) return true;
             String id = order.get(pos);
-            if (isMore(id)) return true;
+            if (isEmpty(id) || isMore(id)) return true;
             NewHomeApps.Entry app = host.apps().get(id);
             if (app != null) host.onAppEdit(app);
             return true;
@@ -158,7 +183,7 @@ final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
             if (pos == RecyclerView.NO_POSITION) return false;
             if (host.onShelfKey(pos, key, event)) return true;
             String id = order.get(pos);
-            if (isMore(id)) return false;
+            if (isEmpty(id) || isMore(id)) return false;
             NewHomeApps.Entry app = host.apps().get(id);
             return app != null && host.onAppKey(app, key, event);
         });
@@ -186,6 +211,15 @@ final class NewHomeAdapter extends RecyclerView.Adapter<NewHomeAdapter.Holder> {
         iconParams.height = iconPx;
         iconParams.gravity = Gravity.CENTER;
         holder.icon.setLayoutParams(iconParams);
+
+        if (isEmpty(id)) {
+            holder.icon.setImageDrawable(null);
+            holder.icon.setBackground(null);
+            holder.icon.setVisibility(View.INVISIBLE);
+            holder.itemView.setFocusable(false);
+            return;
+        }
+        holder.icon.setVisibility(View.VISIBLE);
         holder.icon.invalidateOutline();
 
         if (isMore(id)) {

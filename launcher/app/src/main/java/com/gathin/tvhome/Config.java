@@ -39,6 +39,8 @@ final class Config {
     static final String SETTINGS_NAME = "launcher_settings";
     static final String ROWS_BELOW_DOCK_KEY = "rows_below_dock";
     static final String WALLPAPER_CHOICE_KEY = "wallpaper_choice";
+    /** After wallpaper pick + recreate, NewMain should put focus back on the Settings pill. */
+    static final String RESUME_FOCUS_SETTINGS_KEY = "resume_focus_settings";
     private static final String THEME_REVISION_NAME = "theme_revision";
     private static final String THEME_SIGNATURE_KEY = "theme_signature";
 

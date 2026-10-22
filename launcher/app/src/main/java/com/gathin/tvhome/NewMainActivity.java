@@ -8,6 +8,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
 import android.media.tv.TvContract;
@@ -144,6 +145,13 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         btnReorder = findViewById(R.id.btnReorder);
         btnLibrary = findViewById(R.id.btnLibraryTop);
         btnSettings = findViewById(R.id.btnSettings);
+        // Wallpaper pick calls recreate(); restore Settings focus that onPause cannot see.
+        SharedPreferences launcherSettings =
+                getSharedPreferences(Config.SETTINGS_NAME, MODE_PRIVATE);
+        if (launcherSettings.getBoolean(Config.RESUME_FOCUS_SETTINGS_KEY, false)) {
+            launcherSettings.edit().remove(Config.RESUME_FOCUS_SETTINGS_KEY).apply();
+            topBarResumeFocus = btnSettings;
+        }
         btnInputs.setOnClickListener(v -> showInputs());
         btnWifi.setOnClickListener(v -> openNetwork());
         btnWifi.setOnLongClickListener(v -> {
@@ -186,7 +194,7 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         if (config.shamsiDate) {
             TextView shamsi = findViewById(R.id.shamsiDate);
             shamsi.setVisibility(View.VISIBLE);
-            shamsi.setText(Shamsi.today());
+            shamsi.setText(Shamsi.today(getResources()));
         }
         updateGreeting();
         updateNetworkLabel();
@@ -275,38 +283,58 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
     }
 
     /**
-     * Keep Left/Right/Down inside the shelf. Right on the last cell of a row continues on the
-     * next row instead of jumping into the top bar; Up from the first row still leaves to chrome.
+     * Keep Left/Right/Down among real shelf tiles (skip empty spacers). Left/Right wrap;
+     * Up leaves to the top bar when there is no real tile above.
      */
     @Override public boolean onShelfKey(int position, int key, KeyEvent event) {
         if (movingId != null || chooseMove) return false;
-        int delta;
         switch (key) {
-            case KeyEvent.KEYCODE_DPAD_LEFT: delta = -1; break;
-            case KeyEvent.KEYCODE_DPAD_RIGHT: delta = 1; break;
-            case KeyEvent.KEYCODE_DPAD_UP: delta = -columns; break;
-            case KeyEvent.KEYCODE_DPAD_DOWN: delta = columns; break;
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                break;
             default: return false;
         }
-        int count = adapter.getItemCount();
-        if (count <= 0) return false;
-        if (key == KeyEvent.KEYCODE_DPAD_UP && position < columns) return false;
-        if (event.getAction() != KeyEvent.ACTION_DOWN) return true;
-        int target;
-        if (key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT) {
-            // Wrap across the whole shelf: last → first on Right, first → last on Left.
-            target = (position + delta + count) % count;
-        } else if (key == KeyEvent.KEYCODE_DPAD_DOWN) {
-            if (position + columns < count) target = position + columns;
-            else if (position / columns < (count - 1) / columns) target = count - 1;
-            else return true;
-        } else {
-            target = position + delta;
-            if (target < 0) return true;
+        List<Integer> focusable = focusablePositions();
+        if (focusable.isEmpty()) return false;
+        int at = focusable.indexOf(position);
+        if (at < 0) return false;
+        if (key == KeyEvent.KEYCODE_DPAD_UP) {
+            int above = position - columns;
+            if (above < 0 || NewHomeAdapter.isEmpty(adapter.idAt(above))) return false;
+            if (event.getAction() == KeyEvent.ACTION_DOWN) focusApp(adapter.idAt(above));
+            return true;
         }
-        String id = adapter.idAt(target);
-        if (id != null) focusApp(id);
+        if (event.getAction() != KeyEvent.ACTION_DOWN) return true;
+        if (key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT) {
+            int delta = key == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1;
+            int next = focusable.get((at + delta + focusable.size()) % focusable.size());
+            focusApp(adapter.idAt(next));
+            return true;
+        }
+        // Down: same column if occupied, else last focusable on the row below.
+        int below = position + columns;
+        if (below < adapter.getItemCount() && !NewHomeAdapter.isEmpty(adapter.idAt(below))) {
+            focusApp(adapter.idAt(below));
+            return true;
+        }
+        for (int i = focusable.size() - 1; i >= 0; i--) {
+            int pos = focusable.get(i);
+            if (pos / columns > position / columns) {
+                focusApp(adapter.idAt(pos));
+                return true;
+            }
+        }
         return true;
+    }
+
+    private List<Integer> focusablePositions() {
+        List<Integer> positions = new ArrayList<>();
+        for (int i = 0; i < adapter.getItemCount(); i++) {
+            if (!NewHomeAdapter.isEmpty(adapter.idAt(i))) positions.add(i);
+        }
+        return positions;
     }
 
     @Override public void onMoreFocused() {
@@ -384,6 +412,7 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
     }
 
     private void renderHome() {
+        autoStashOverflow();
         String restore = movingId != null ? movingId : focusedId;
         hint.setText(movingId != null ? "移动模式 · 确定保存 · 返回取消"
                 : chooseMove ? "方向键选择 · 确定选择要移动的应用 · 返回退出"
@@ -397,11 +426,12 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
             return;
         }
         String target;
-        if (restore != null && visible.contains(restore)) target = restore;
+        if (restore != null && visible.contains(restore) && !NewHomeAdapter.isEmpty(restore))
+            target = restore;
         else if (restore != null && moreOrder().contains(restore)
                 && visible.contains(NewHomeAdapter.MORE_ID))
             target = NewHomeAdapter.MORE_ID;
-        else target = visible.get(0);
+        else target = firstFocusableId(visible);
         // Returning from Wi‑Fi / Settings must not yank focus back into the shelf.
         View chrome = topBarResumeFocus;
         topBarResumeFocus = null;
@@ -429,30 +459,104 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         return shelf;
     }
 
-    /** Two-row shelf; More appears only after the owner has stashed at least one app. */
+    /**
+     * Apps beyond the two-row home capacity are moved into More automatically.
+     * More occupies one home cell, so at most {@code slots - 1} apps stay outside — same cap as 展示.
+     * A full two rows (exactly {@code slots} apps) therefore stashes one into More as well.
+     */
+    private void autoStashOverflow() {
+        List<String> shelf = shelfOrder();
+        int slots = columns * HOME_ROWS;
+        int keep = Math.max(0, slots - 1);
+        // Same limit as showOnHome: outside is full at keep, whether or not More already exists.
+        if (shelf.size() <= keep) return;
+        boolean changed = false;
+        for (int i = shelf.size() - 1; i >= keep; i--) {
+            String id = shelf.get(i);
+            if (pinned.contains(id)) continue;
+            stashed.add(id);
+            changed = true;
+        }
+        shelf = shelfOrder();
+        while (shelf.size() > keep) {
+            String victim = null;
+            for (int i = shelf.size() - 1; i >= 0; i--) {
+                if (!pinned.contains(shelf.get(i))) {
+                    victim = shelf.get(i);
+                    break;
+                }
+            }
+            if (victim == null) break;
+            stashed.add(victim);
+            changed = true;
+            shelf = shelfOrder();
+        }
+        if (changed) store.saveStashed(stashed);
+    }
+
+    /**
+     * Two-row shelf filled bottom-row-first (left→right), then top row (left→right).
+     * Empty spacers hold the top row until the bottom row is full. More appears only after
+     * at least one app is stashed: last on the bottom row while that row still has room,
+     * otherwise first on the top row.
+     */
     private List<String> visibleOrder() {
         List<String> shelf = shelfOrder();
         int slots = columns * HOME_ROWS;
+        List<String> fill = new ArrayList<>();
         if (stashed.isEmpty()) {
-            // No stashed apps yet: fill both rows, do not show More.
-            if (shelf.size() <= slots) return shelf;
-            return new ArrayList<>(shelf.subList(0, slots));
+            fill.addAll(shelf.size() <= slots ? shelf : shelf.subList(0, slots));
+        } else {
+            int keep = Math.max(0, slots - 1);
+            List<String> apps = shelf.subList(0, Math.min(keep, shelf.size()));
+            if (apps.size() < columns) {
+                // Bottom row only: More sits at the end.
+                fill.addAll(apps);
+                fill.add(NewHomeAdapter.MORE_ID);
+            } else {
+                // Bottom row full of apps; More leads the top row.
+                fill.addAll(apps.subList(0, columns));
+                fill.add(NewHomeAdapter.MORE_ID);
+                if (apps.size() > columns) {
+                    fill.addAll(apps.subList(columns, apps.size()));
+                }
+            }
         }
-        int keep = Math.max(0, slots - 1);
-        List<String> visible = new ArrayList<>(shelf.subList(0, Math.min(keep, shelf.size())));
-        visible.add(NewHomeAdapter.MORE_ID);
+        return bottomFirstLayout(fill, columns);
+    }
+
+    /** Maps fill-order apps onto a grid whose bottom row is occupied before the top row. */
+    private static List<String> bottomFirstLayout(List<String> fill, int cols) {
+        if (fill.isEmpty() || cols <= 0) return fill;
+        if (fill.size() <= cols) {
+            List<String> visible = new ArrayList<>(cols + fill.size());
+            for (int i = 0; i < cols; i++) visible.add(NewHomeAdapter.emptyId(i));
+            visible.addAll(fill);
+            return visible;
+        }
+        List<String> bottom = fill.subList(0, cols);
+        List<String> top = fill.subList(cols, fill.size());
+        List<String> visible = new ArrayList<>(cols * 2);
+        visible.addAll(top);
+        for (int i = top.size(); i < cols; i++) visible.add(NewHomeAdapter.emptyId(i));
+        visible.addAll(bottom);
         return visible;
     }
 
-    /** Stashed apps, plus shelf apps that no longer fit once More takes a cell. */
+    private static String firstFocusableId(List<String> visible) {
+        for (String id : visible) if (!NewHomeAdapter.isEmpty(id)) return id;
+        return null;
+    }
+
+    /** Apps that were stashed into More (manually or by auto-overflow). */
     private List<String> moreOrder() {
         if (stashed.isEmpty()) return Collections.emptyList();
-        List<String> shelf = shelfOrder();
-        int keep = Math.max(0, columns * HOME_ROWS - 1);
         List<String> more = new ArrayList<>();
-        if (shelf.size() > keep) more.addAll(shelf.subList(keep, shelf.size()));
         for (String id : order) {
-            if (stashed.contains(id) && !more.contains(id)) more.add(id);
+            if (stashed.contains(id)) more.add(id);
+        }
+        for (String id : stashed) {
+            if (!more.contains(id)) more.add(id);
         }
         return more;
     }
@@ -532,7 +636,15 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
 
             @Override public int getItemCount() { return more.size(); }
         });
-        moreDialog.setOnDismissListener(d -> moreDialog = null);
+        moreDialog.setOnDismissListener(d -> {
+            moreDialog = null;
+            // Dialog stole focus; put the shelf cursor back on More when it is still there.
+            if (movingId != null) return;
+            if (visibleOrder().contains(NewHomeAdapter.MORE_ID)) {
+                focusedId = NewHomeAdapter.MORE_ID;
+                grid.post(() -> focusApp(NewHomeAdapter.MORE_ID));
+            }
+        });
         moreDialog.setOnShowListener(d -> list.post(() -> {
             RecyclerView.ViewHolder first = list.findViewHolderForAdapterPosition(0);
             if (first != null) first.itemView.requestFocus();
@@ -570,36 +682,49 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
     }
 
     /**
-     * Puts a More-folder app back on the two-row shelf. If the shelf is already full,
-     * ask the owner to stash something first instead of silently overflowing.
+     * Puts a More-folder app back on the two-row shelf. While More is on the home grid it
+     * occupies one cell, so at most {@code slots - 1} apps fit outside. If that capacity is
+     * already reached, only tip — do not unstash or reorder (including the last More item).
      */
     private void showOnHome(NewHomeApps.Entry app) {
-        boolean wasStashed = stashed.contains(app.id);
-        if (wasStashed) {
-            int slots = columns * HOME_ROWS;
-            int shelfAfter = shelfOrder().size() + 1;
-            int stashedAfter = stashed.size() - 1;
-            int homeAppSlots = stashedAfter > 0 ? slots - 1 : slots;
-            if (shelfAfter > homeAppSlots) {
-                new AlertDialog.Builder(this)
-                        .setMessage("首页两行已满，请先收纳一个应用后再展示")
-                        .setPositiveButton("知道了", null)
-                        .show();
-                return;
-            }
-            stashed.remove(app.id);
-            store.saveStashed(stashed);
-        } else {
-            // Capacity overflow: promote it to the front of the shelf without growing the count.
-            order.remove(app.id);
-            int insert = 0;
-            while (insert < order.size() && pinned.contains(order.get(insert))) insert++;
-            order.add(insert, app.id);
-            store.saveOrder(order);
+        if (!stashed.contains(app.id)) return;
+        // More is visible whenever 展示 is offered; outside is full at slots - 1 apps.
+        int homeAppSlots = Math.max(0, columns * HOME_ROWS - 1);
+        if (shelfOrder().size() >= homeAppSlots) {
+            Toast.makeText(this, "外面已经放不下啦", Toast.LENGTH_SHORT).show();
+            return;
         }
+        stashed.remove(app.id);
+        store.saveStashed(stashed);
+        moveToLastVisibleShelfSlot(app.id);
         if (moreDialog != null) moreDialog.dismiss();
-        focusedId = app.id;
+        // Opened from More — keep the cursor on More after 展示, unless More itself went away.
+        focusedId = visibleOrder().contains(NewHomeAdapter.MORE_ID)
+                ? NewHomeAdapter.MORE_ID : app.id;
         renderHome();
+    }
+
+    /**
+     * Places {@code id} as the last tile in the visible shelf window (bottom-first fill order)
+     * without reshuffling the apps that were already on the shelf.
+     */
+    private void moveToLastVisibleShelfSlot(String id) {
+        order.remove(id);
+        int slots = columns * HOME_ROWS;
+        int keep = stashed.isEmpty() ? slots : Math.max(0, slots - 1);
+        int seen = 0;
+        int insertAt = order.size();
+        for (int i = 0; i < order.size(); i++) {
+            if (stashed.contains(order.get(i))) continue;
+            seen++;
+            if (seen == keep) {
+                insertAt = i;
+                break;
+            }
+            insertAt = i + 1;
+        }
+        order.add(insertAt, id);
+        store.saveOrder(order);
     }
 
     private void updateTileMetrics() {
@@ -621,11 +746,9 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         if (rowsBudget > 0) width = Math.min(width, Math.max(dp(48), rowsBudget / HOME_ROWS - gap * 2));
         int iconSize = Math.max(dp(32), Math.round(width * 0.8f));
         adapter.setMetrics(width, iconSize, gap);
-        // One row only: sit on the bottom row of the two-row shelf (pad one row above).
-        int count = adapter.getItemCount();
-        int top = (count > 0 && count <= columns) ? baseV + width + gap * 2 : baseV;
-        if (grid.getPaddingTop() != top || grid.getPaddingBottom() != baseV) {
-            grid.setPadding(grid.getPaddingLeft(), top, grid.getPaddingRight(), baseV);
+        // Bottom-first layout uses empty spacers for the top row; keep even vertical padding.
+        if (grid.getPaddingTop() != baseV || grid.getPaddingBottom() != baseV) {
+            grid.setPadding(grid.getPaddingLeft(), baseV, grid.getPaddingRight(), baseV);
         }
         if (grid.computeVerticalScrollOffset() != 0) {
             ((GridLayoutManager) grid.getLayoutManager()).scrollToPositionWithOffset(0, 0);
@@ -793,7 +916,7 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
                 ? R.string.good_evening : R.string.good_night;
         greeting.setText(config.greetingName.isEmpty() ? getString(res)
                 : getString(R.string.greeting_with_name, getString(res), config.greetingName));
-        if (config.shamsiDate) ((TextView) findViewById(R.id.shamsiDate)).setText(Shamsi.today());
+        if (config.shamsiDate) ((TextView) findViewById(R.id.shamsiDate)).setText(Shamsi.today(getResources()));
     }
 
     private void updateNetworkLabel() {

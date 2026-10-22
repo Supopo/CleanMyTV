@@ -68,8 +68,11 @@ final class WallpaperPicker {
                 row.setOnClickListener(v -> {
                     int pos = holder.getBindingAdapterPosition();
                     if (pos == RecyclerView.NO_POSITION) return;
+                    // recreate() runs while dialog had focus, so onPause cannot see Settings —
+                    // persist the resume target for the new Activity instance.
                     choices.edit()
                             .putString(Config.WALLPAPER_CHOICE_KEY, images.get(pos).getName())
+                            .putBoolean(Config.RESUME_FOCUS_SETTINGS_KEY, true)
                             .commit();
                     dialog.dismiss();
                     activity.recreate();
@@ -99,6 +102,12 @@ final class WallpaperPicker {
             };
             grid.post(focus);
             grid.postDelayed(focus, 80);
+        });
+        // Back / cancel: return focus to Settings (opened from its long-press).
+        dialog.setOnDismissListener(d -> {
+            if (activity.isFinishing()) return;
+            View settings = activity.findViewById(R.id.btnSettings);
+            if (settings != null) settings.post(settings::requestFocus);
         });
         dialog.show();
     }

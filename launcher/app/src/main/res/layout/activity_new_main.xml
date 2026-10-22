@@ -15,12 +15,12 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:orientation="vertical"
         android:paddingStart="56dp"
-        android:paddingEnd="56dp"
         android:paddingTop="26dp"
-        android:clipChildren="false"
-        android:clipToPadding="false">
+        android:paddingEnd="56dp">
 
         <!-- No clipping down to the pills: with advanced effects a focused pill scales up past its row. -->
         <RelativeLayout
@@ -34,8 +34,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_alignParentStart="true"
-                android:layout_toStartOf="@+id/topButtons"
                 android:layout_marginEnd="16dp"
+                android:layout_toStartOf="@+id/topButtons"
                 android:orientation="vertical">
 
                 <!-- The header texts use gravity left, not start: the launcher lays out left to right
@@ -43,50 +43,50 @@
                      right edge of these full-width lines instead of staying under the clock. -->
                 <TextView
                     android:id="@+id/greeting"
-                    android:gravity="left"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:singleLine="true"
-                    android:ellipsize="end"
                     android:layout_marginStart="4dp"
-                    android:textColor="#8CFFFFFF"
-                    android:textSize="12sp"
+                    android:ellipsize="end"
                     android:fontFamily="@font/outfit_medium"
+                    android:gravity="left"
                     android:letterSpacing="0.22"
-                    android:textAllCaps="true" />
+                    android:singleLine="true"
+                    android:textAllCaps="true"
+                    android:textColor="#8CFFFFFF"
+                    android:textSize="12sp" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:baselineAligned="true">
+                    android:baselineAligned="true"
+                    android:orientation="horizontal">
 
                     <TextClock
                         android:id="@+id/clock"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:fontFamily="@font/outfit_light"
                         android:format12Hour="h:mm"
                         android:format24Hour="HH:mm"
-                        android:textColor="#FFFFFFFF"
-                        android:textSize="52sp"
-                        android:fontFamily="@font/outfit_light"
+                        android:includeFontPadding="false"
                         android:letterSpacing="-0.04"
-                        android:includeFontPadding="false" />
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="52sp" />
 
                     <TextClock
                         android:id="@+id/ampm"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="6dp"
                         android:layout_gravity="bottom"
+                        android:layout_marginStart="6dp"
                         android:layout_marginBottom="8dp"
+                        android:fontFamily="@font/outfit_medium"
                         android:format12Hour="a"
                         android:format24Hour=""
-                        android:textColor="#B3FFFFFF"
-                        android:textSize="15sp"
-                        android:fontFamily="@font/outfit_medium"
                         android:letterSpacing="0.08"
-                        android:textAllCaps="true" />
+                        android:textAllCaps="true"
+                        android:textColor="#B3FFFFFF"
+                        android:textSize="15sp" />
 
                     <View
                         android:layout_width="1dp"
@@ -99,43 +99,43 @@
 
                     <LinearLayout
                         android:layout_width="0dp"
-                        android:layout_weight="1"
                         android:layout_height="wrap_content"
                         android:layout_gravity="bottom"
                         android:layout_marginBottom="9dp"
+                        android:layout_weight="1"
                         android:orientation="vertical">
 
                         <!-- Shamsi date ("27 Mehr 1405"), shown when shamsi_date is on. -->
                         <TextView
                             android:id="@+id/shamsiDate"
-                            android:gravity="left"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:singleLine="true"
                             android:ellipsize="end"
+                            android:fontFamily="@font/outfit_regular"
+                            android:gravity="left"
+                            android:includeFontPadding="false"
+                            android:letterSpacing="0.02"
+                            android:singleLine="true"
                             android:textColor="#E6FFFFFF"
                             android:textSize="17sp"
-                            android:fontFamily="@font/outfit_regular"
-                            android:letterSpacing="0.02"
-                            android:includeFontPadding="false"
                             android:visibility="gone" />
 
                         <TextClock
                             android:id="@+id/date"
-                            android:gravity="left"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:singleLine="@bool/date_single_line"
-                            android:maxLines="2"
-                            android:lineSpacingExtra="6dp"
                             android:ellipsize="end"
+                            android:fontFamily="@font/outfit_regular"
                             android:format12Hour="@string/date_format_home"
                             android:format24Hour="@string/date_format_home"
-                            android:textColor="#A6FFFFFF"
-                            android:textSize="14sp"
-                            android:fontFamily="@font/outfit_regular"
+                            android:gravity="left"
                             android:letterSpacing="0.14"
-                            android:textAllCaps="true" />
+                            android:lineSpacingExtra="6dp"
+                            android:maxLines="2"
+                            android:singleLine="@bool/date_single_line"
+                            android:textAllCaps="true"
+                            android:textColor="#A6FFFFFF"
+                            android:textSize="14sp" />
                     </LinearLayout>
                 </LinearLayout>
 
@@ -146,8 +146,6 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_alignParentEnd="true"
-                android:layout_alignBottom="@id/leftBlock"
-                android:layout_marginBottom="6dp"
                 android:clipChildren="false"
                 android:clipToPadding="false"
                 android:orientation="horizontal">
@@ -155,19 +153,19 @@
                 <TextView
                     android:id="@+id/btnInputs"
                     style="@style/TopButton"
-                    android:text="@string/inputs"
                     android:drawableStart="@drawable/ic_input"
-                    android:nextFocusDown="@+id/grid" />
+                    android:nextFocusDown="@+id/grid"
+                    android:text="@string/inputs" />
 
                 <TextView
                     android:id="@+id/btnWifi"
                     style="@style/TopButton"
-                    android:maxWidth="180dp"
-                    android:singleLine="true"
-                    android:ellipsize="end"
-                    android:text="@string/wifi"
                     android:drawableStart="@drawable/ic_wifi"
-                    android:nextFocusDown="@+id/grid" />
+                    android:ellipsize="end"
+                    android:maxWidth="180dp"
+                    android:nextFocusDown="@+id/grid"
+                    android:singleLine="true"
+                    android:text="@string/wifi" />
 
                 <TextView
                     android:id="@+id/btnReorder"
@@ -179,17 +177,17 @@
                 <TextView
                     android:id="@+id/btnLibraryTop"
                     style="@style/TopButtonIcon"
-                    android:visibility="gone"
                     android:contentDescription="@string/app_library"
                     android:drawableStart="@drawable/ic_apps"
-                    android:nextFocusDown="@+id/grid" />
+                    android:nextFocusDown="@+id/grid"
+                    android:visibility="gone" />
 
                 <TextView
                     android:id="@+id/btnSettings"
                     style="@style/TopButton"
-                    android:text="@string/settings"
                     android:drawableStart="@drawable/ic_settings"
-                    android:nextFocusDown="@+id/grid" />
+                    android:nextFocusDown="@+id/grid"
+                    android:text="@string/settings" />
             </LinearLayout>
         </RelativeLayout>
 
@@ -197,27 +195,27 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1"
             android:layout_marginTop="20dp"
-            android:orientation="vertical"
+            android:layout_weight="1"
             android:clipChildren="true"
-            android:clipToPadding="true">
+            android:clipToPadding="true"
+            android:orientation="vertical">
 
             <TextView
                 android:id="@+id/newHomeTitle"
                 android:layout_width="match_parent"
                 android:layout_height="40dp"
                 android:layout_marginBottom="8dp"
+                android:elevation="2dp"
+                android:ellipsize="end"
+                android:fontFamily="@font/outfit_medium"
                 android:gravity="center_vertical"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:singleLine="true"
                 android:text="你的应用"
                 android:textColor="#FFFFFFFF"
-                android:textSize="28sp"
-                android:fontFamily="@font/outfit_medium"
-                android:elevation="2dp"
-                android:singleLine="true"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:includeFontPadding="false" />
+                android:textSize="28sp" />
 
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/grid"
@@ -226,11 +224,11 @@
                 android:layout_weight="1"
                 android:clipChildren="false"
                 android:clipToPadding="false"
-                android:paddingLeft="8dp"
-                android:paddingRight="8dp"
-                android:paddingTop="16dp"
-                android:paddingBottom="16dp"
                 android:overScrollMode="never"
+                android:paddingLeft="8dp"
+                android:paddingTop="16dp"
+                android:paddingRight="8dp"
+                android:paddingBottom="16dp"
                 android:scrollbars="none" />
 
             <TextView
