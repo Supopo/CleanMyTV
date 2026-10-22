@@ -17,6 +17,9 @@ import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.List;
 
 /** On-TV picker: tap a thumbnail to set that wallpaper. */
@@ -68,10 +71,12 @@ final class WallpaperPicker {
                 row.setOnClickListener(v -> {
                     int pos = holder.getBindingAdapterPosition();
                     if (pos == RecyclerView.NO_POSITION) return;
+                    File chosen = images.get(pos);
+                    mirrorChoice(activity, chosen);
                     // recreate() runs while dialog had focus, so onPause cannot see Settings —
                     // persist the resume target for the new Activity instance.
                     choices.edit()
-                            .putString(Config.WALLPAPER_CHOICE_KEY, images.get(pos).getName())
+                            .putString(Config.WALLPAPER_CHOICE_KEY, chosen.getName())
                             .putBoolean(Config.RESUME_FOCUS_SETTINGS_KEY, true)
                             .commit();
                     dialog.dismiss();
@@ -110,6 +115,22 @@ final class WallpaperPicker {
             if (settings != null) settings.post(settings::requestFocus);
         });
         dialog.show();
+    }
+
+    /** Keeps a durable internal copy so reboot before external mount still shows the pick. */
+    private static void mirrorChoice(Activity activity, File source) {
+        File dest = new File(activity.getFilesDir(), Config.WALLPAPER_CHOICE_FILE);
+        try (FileInputStream in = new FileInputStream(source);
+             FileOutputStream out = new FileOutputStream(dest)) {
+            byte[] buffer = new byte[16 * 1024];
+            int read;
+            while ((read = in.read(buffer)) >= 0) out.write(buffer, 0, read);
+            out.getFD().sync();
+        } catch (IOException failed) {
+            // Prefs still hold the name; Config can resolve from the theme folder later.
+            //noinspection ResultOfMethodCallIgnored
+            dest.delete();
+        }
     }
 
     private static int indexOf(List<File> images, String name) {

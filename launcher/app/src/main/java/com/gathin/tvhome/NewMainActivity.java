@@ -109,8 +109,9 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         setContentView(R.layout.activity_new_main);
-        // First Studio install copies ~14 wallpapers; never block the first frame on that.
-        io.execute(() -> BuiltinWallpapers.install(getApplicationContext()));
+        // Must finish before Config.load so an on-TV wallpaper pick can resolve after reboot.
+        // Already-installed files are existence checks only; a cold copy is rare.
+        BuiltinWallpapers.install(this);
         config = Config.load(this);
         store = new NewHomeStore(this);
         density = getResources().getDisplayMetrics().density;
@@ -416,7 +417,7 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         String restore = movingId != null ? movingId : focusedId;
         hint.setText(movingId != null ? "移动模式 · 确定保存 · 返回取消"
                 : chooseMove ? "方向键选择 · 确定选择要移动的应用 · 返回退出"
-                : "方向键选择 · 确定打开 · 长按确定 / 菜单键编辑应用");
+                : "方向键选择 · 确定打开 · 长按确定 / 菜单键编辑应用 · 长按顶部设置更换壁纸");
         List<String> visible = visibleOrder();
         adapter.submit(visible);
         updateTileMetrics();

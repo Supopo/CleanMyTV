@@ -39,6 +39,8 @@ final class Config {
     static final String SETTINGS_NAME = "launcher_settings";
     static final String ROWS_BELOW_DOCK_KEY = "rows_below_dock";
     static final String WALLPAPER_CHOICE_KEY = "wallpaper_choice";
+    /** Internal copy of the on-TV pick so Home still shows it if external files are late at boot. */
+    static final String WALLPAPER_CHOICE_FILE = "wallpaper_choice.jpg";
     /** After wallpaper pick + recreate, NewMain should put focus back on the Settings pill. */
     static final String RESUME_FOCUS_SETTINGS_KEY = "resume_focus_settings";
     private static final String THEME_REVISION_NAME = "theme_revision";
@@ -409,11 +411,19 @@ final class Config {
             wallpapers.clear();
             wallpaper = null;
             wallpaperEnabled = false;
-        } else if (wallpaperChoice != null && dir != null) {
-            File picked = WallpaperRotation.find(
-                    WallpaperRotation.images(new File(dir, "wallpapers")), wallpaperChoice);
-            if (picked == null && wallpaperChoice.equals(
-                    wallpaper != null ? wallpaper.getName() : "")) picked = wallpaper;
+        } else if (wallpaperChoice != null) {
+            File picked = null;
+            if (dir != null) {
+                picked = WallpaperRotation.find(
+                        WallpaperRotation.images(new File(dir, "wallpapers")), wallpaperChoice);
+                if (picked == null && wallpaperChoice.equals(
+                        wallpaper != null ? wallpaper.getName() : "")) picked = wallpaper;
+            }
+            // Boot before external storage is ready: use the internal copy from the last pick.
+            if (picked == null) {
+                File local = new File(ctx.getFilesDir(), WALLPAPER_CHOICE_FILE);
+                if (local.isFile() && local.length() > 0) picked = local;
+            }
             if (picked != null) {
                 wallpapers.clear();
                 wallpapers.add(picked);
@@ -479,10 +489,22 @@ final class Config {
                     .remove("advanced_effects").remove(ROWS_BELOW_DOCK_KEY).remove(WALLPAPER_CHOICE_KEY);
             editor.putString(THEME_SIGNATURE_KEY, signature).commit();
         } else if (!seen.equals(signature)) {
-            choices.edit().remove("columns").remove("animations").remove("advanced_effects")
-                    .remove(ROWS_BELOW_DOCK_KEY).remove(WALLPAPER_CHOICE_KEY)
-                    .putString(THEME_SIGNATURE_KEY, signature).commit();
+            // config.json mtime can drift across remounts; only a real theme_revision change
+            // (theme.sh push/reset) should wipe the on-TV wallpaper pick.
+            String seenToken = seenToken(seen);
+            SharedPreferences.Editor editor = choices.edit()
+                    .remove("columns").remove("animations").remove("advanced_effects")
+                    .remove(ROWS_BELOW_DOCK_KEY)
+                    .putString(THEME_SIGNATURE_KEY, signature);
+            if (!seenToken.equals(token)) editor.remove(WALLPAPER_CHOICE_KEY);
+            editor.commit();
         }
+    }
+
+    private static String seenToken(String signature) {
+        if (signature == null) return "absent";
+        int at = signature.indexOf(':');
+        return at >= 0 ? signature.substring(at + 1) : "absent";
     }
 
     private static String fileStamp(File file) {

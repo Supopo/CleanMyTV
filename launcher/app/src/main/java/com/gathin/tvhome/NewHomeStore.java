@@ -30,7 +30,8 @@ final class NewHomeStore {
     }
 
     void saveOrder(List<String> order) {
-        prefs.edit().putString("order", new JSONArray(order).toString()).apply();
+        // commit(): TV power-off / reboot must not lose the shelf before apply() flushes.
+        prefs.edit().putString("order", new JSONArray(order).toString()).commit();
     }
 
     Set<String> pins() {
@@ -38,7 +39,7 @@ final class NewHomeStore {
     }
 
     void savePins(Set<String> pins) {
-        prefs.edit().putStringSet("pins", new HashSet<>(pins)).apply();
+        prefs.edit().putStringSet("pins", new HashSet<>(pins)).commit();
     }
 
     /** Apps the owner moved into the More folder. */
@@ -47,6 +48,6 @@ final class NewHomeStore {
     }
 
     void saveStashed(Set<String> stashed) {
-        prefs.edit().putStringSet("stashed", new HashSet<>(stashed)).apply();
+        prefs.edit().putStringSet("stashed", new HashSet<>(stashed)).commit();
     }
 }
