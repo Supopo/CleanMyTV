@@ -243,4 +243,45 @@
         </LinearLayout>
     </LinearLayout>
 
+    <!-- Covers the shelf until the first app list is ready (boot / cold start). -->
+    <FrameLayout
+        android:id="@+id/shelfLoading"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#66000000"
+        android:clickable="true"
+        android:focusable="false"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:background="@drawable/bg_shelf_loading"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="28dp"
+            android:paddingTop="18dp"
+            android:paddingEnd="28dp"
+            android:paddingBottom="18dp">
+
+            <ImageView
+                android:id="@+id/shelfLoadingSpin"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:contentDescription="@null"
+                android:importantForAccessibility="no"
+                android:src="@drawable/ic_shelf_loading_spinner" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:fontFamily="@font/outfit_medium"
+                android:text="@string/shelf_loading"
+                android:textColor="#FFFFFFFF"
+                android:textSize="18sp" />
+        </LinearLayout>
+    </FrameLayout>
+
 </FrameLayout>

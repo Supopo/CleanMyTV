@@ -30,6 +30,8 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.view.animation.LinearInterpolator;
+import android.view.animation.RotateAnimation;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -105,6 +107,13 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
     private AlertDialog moreDialog;
     /** Top-bar control that had focus when Home paused (Wi‑Fi / Settings / …). */
     private View topBarResumeFocus;
+    /** Last top-bar pill focused; Up from the shelf returns here. */
+    private View lastTopBarFocus;
+    /** Dim overlay while PackageManager is still filling the shelf after boot. */
+    private View shelfLoading;
+    private View shelfLoadingSpin;
+    private boolean shelfReady;
+    private final Runnable hideLoadingTimeout = this::hideShelfLoading;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -146,6 +155,9 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         btnReorder = findViewById(R.id.btnReorder);
         btnLibrary = findViewById(R.id.btnLibraryTop);
         btnSettings = findViewById(R.id.btnSettings);
+        shelfLoading = findViewById(R.id.shelfLoading);
+        shelfLoadingSpin = findViewById(R.id.shelfLoadingSpin);
+        showShelfLoading();
         // Wallpaper pick calls recreate(); restore Settings focus that onPause cannot see.
         SharedPreferences launcherSettings =
                 getSharedPreferences(Config.SETTINGS_NAME, MODE_PRIVATE);
@@ -171,10 +183,14 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         });
         View.OnKeyListener topKeys = (view, key, event) -> {
             if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+            lastTopBarFocus = view;
+            // Top bar stays on the top bar for Left/Right (with wrap); Up does nothing.
             if (key == KeyEvent.KEYCODE_DPAD_UP) return true;
+            if (key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                return wrapTopBarFocus(view, key == KeyEvent.KEYCODE_DPAD_RIGHT);
+            }
             if (key != KeyEvent.KEYCODE_DPAD_DOWN) return false;
-            // While apps are still loading the shelf has no children; keep Down on the top bar
-            // and retry focus once the grid is bound instead of dropping the press.
+            // Down leaves the top bar for the middle shelf.
             if (adapter.getItemCount() == 0) return true;
             String id = focusedId != null ? focusedId : (order.isEmpty() ? null : order.get(0));
             if (id == null) id = adapter.idAt(0);
@@ -231,11 +247,65 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
     @Override protected void onDestroy() {
         appsLoadGen++;
         handler.removeCallbacks(minuteTick);
+        handler.removeCallbacks(hideLoadingTimeout);
         unregisterReceiver(packages);
         if (library != null) library.close();
         wallpaperPlayer.close();
         io.shutdownNow();
         super.onDestroy();
+    }
+
+    /** Semi-transparent “正在加载桌面” sheet until the shelf has real app tiles. */
+    private void showShelfLoading() {
+        if (shelfReady || shelfLoading == null) return;
+        handler.removeCallbacks(hideLoadingTimeout);
+        shelfLoading.animate().cancel();
+        shelfLoading.setAlpha(0f);
+        shelfLoading.setVisibility(View.VISIBLE);
+        shelfLoading.animate().alpha(1f).setDuration(220).start();
+        startShelfLoadingSpin();
+        // Never block the remote forever if PackageManager stays empty.
+        handler.postDelayed(hideLoadingTimeout, 15_000L);
+    }
+
+    private void hideShelfLoading() {
+        handler.removeCallbacks(hideLoadingTimeout);
+        boolean reveal = !shelfReady;
+        shelfReady = true;
+        // Paint apps + More together the moment the sheet starts to dismiss.
+        if (reveal) renderHome();
+        if (shelfLoading == null || shelfLoading.getVisibility() != View.VISIBLE) return;
+        stopShelfLoadingSpin();
+        shelfLoading.animate().cancel();
+        shelfLoading.animate().alpha(0f).setDuration(280).withEndAction(() -> {
+            shelfLoading.setVisibility(View.GONE);
+            shelfLoading.setAlpha(1f);
+        }).start();
+    }
+
+    /** One full turn every 2.4s — slower than the default ProgressBar spinner. */
+    private void startShelfLoadingSpin() {
+        if (shelfLoadingSpin == null) return;
+        shelfLoadingSpin.clearAnimation();
+        RotateAnimation spin = new RotateAnimation(0f, 360f,
+                RotateAnimation.RELATIVE_TO_SELF, 0.5f,
+                RotateAnimation.RELATIVE_TO_SELF, 0.5f);
+        spin.setDuration(2400L);
+        spin.setRepeatCount(RotateAnimation.INFINITE);
+        spin.setInterpolator(new LinearInterpolator());
+        shelfLoadingSpin.startAnimation(spin);
+    }
+
+    private void stopShelfLoadingSpin() {
+        if (shelfLoadingSpin != null) shelfLoadingSpin.clearAnimation();
+    }
+
+    /** True when the two-row shelf shows at least one real app (not only More / spacers). */
+    private boolean shelfHasAppTiles() {
+        for (String id : visibleOrder()) {
+            if (!NewHomeAdapter.isEmpty(id) && !NewHomeAdapter.isMore(id)) return true;
+        }
+        return false;
     }
 
     @Override protected void onNewIntent(Intent intent) {
@@ -284,8 +354,8 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
     }
 
     /**
-     * Keep Left/Right/Down among real shelf tiles (skip empty spacers). Left/Right wrap;
-     * Up leaves to the top bar when there is no real tile above.
+     * Middle shelf: Left/Right wrap only among shelf tiles; Down stays in the shelf;
+     * Up moves within the shelf or, from the top shelf row, enters the top bar.
      */
     @Override public boolean onShelfKey(int position, int key, KeyEvent event) {
         if (movingId != null || chooseMove) return false;
@@ -303,8 +373,12 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         if (at < 0) return false;
         if (key == KeyEvent.KEYCODE_DPAD_UP) {
             int above = position - columns;
-            if (above < 0 || NewHomeAdapter.isEmpty(adapter.idAt(above))) return false;
-            if (event.getAction() == KeyEvent.ACTION_DOWN) focusApp(adapter.idAt(above));
+            if (above >= 0 && !NewHomeAdapter.isEmpty(adapter.idAt(above))) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) focusApp(adapter.idAt(above));
+                return true;
+            }
+            // Top shelf row → top bar (not wrap within the shelf).
+            if (event.getAction() == KeyEvent.ACTION_DOWN) focusTopBarFromShelf();
             return true;
         }
         if (event.getAction() != KeyEvent.ACTION_DOWN) return true;
@@ -314,7 +388,7 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
             focusApp(adapter.idAt(next));
             return true;
         }
-        // Down: same column if occupied, else last focusable on the row below.
+        // Down: same column if occupied, else last focusable on the row below; never leave shelf.
         int below = position + columns;
         if (below < adapter.getItemCount() && !NewHomeAdapter.isEmpty(adapter.idAt(below))) {
             focusApp(adapter.idAt(below));
@@ -380,6 +454,7 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         final int gen = ++appsLoadGen;
         final Context appContext = getApplicationContext();
         final NewHomeStore homeStore = store;
+        final int epochAtStart = homeStore.epoch();
         io.execute(() -> {
             Set<String> hidden = LibraryApps.loadRemoved(appContext);
             List<NewHomeApps.Entry> loaded = NewHomeApps.load(appContext);
@@ -390,17 +465,34 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
                 nextApps.put(app.id, app);
                 installed.add(app.id);
             }
-            Set<String> livePins = NewHomeOrder.livePins(homeStore.pins(), installed, MAX_PINS);
-            homeStore.savePins(livePins);
-            List<String> nextOrder = NewHomeOrder.reconcile(installed, homeStore.order(), livePins);
-            homeStore.saveOrder(nextOrder);
-            Set<String> liveStash = new HashSet<>(homeStore.stashed());
-            liveStash.retainAll(new HashSet<>(installed));
+            // Re-read after package scan so a concurrent owner edit is not overwritten.
+            if (homeStore.epoch() != epochAtStart) return;
+            List<String> savedOrder = homeStore.order();
+            Set<String> savedStash = homeStore.stashed();
+            Set<String> savedPins = homeStore.pins();
+            // Boot scans often return only a handful of apps; never persist that over a full shelf.
+            boolean incomplete = NewHomeOrder.looksIncomplete(savedOrder, installed)
+                    || NewHomeOrder.looksIncomplete(new ArrayList<>(savedStash), installed);
+            Set<String> livePins = NewHomeOrder.livePins(savedPins, installed, MAX_PINS);
+            List<String> nextOrder = NewHomeOrder.reconcile(installed, savedOrder, livePins);
+            Set<String> liveStash = NewHomeOrder.remapIds(savedStash, installed);
             // A pinned favourite stays on the shelf, not in More.
             liveStash.removeAll(livePins);
-            homeStore.saveStashed(liveStash);
+            if (homeStore.epoch() != epochAtStart) return;
+            boolean changed = !nextOrder.equals(savedOrder)
+                    || !liveStash.equals(savedStash)
+                    || !livePins.equals(savedPins);
+            // Incomplete PackageManager passes must not wipe new_home_shelf.json.
+            if (changed && !incomplete) homeStore.saveAll(nextOrder, liveStash, livePins);
+            final int epochAfter = homeStore.epoch();
+            final boolean rescan = incomplete;
             handler.post(() -> {
                 if (gen != appsLoadGen || isFinishing()) return;
+                // Owner wrote while we were loading — discard this stale pass and reload.
+                if (homeStore.epoch() != epochAfter) {
+                    reloadApps();
+                    return;
+                }
                 apps.clear();
                 apps.putAll(nextApps);
                 pinned = livePins;
@@ -408,19 +500,30 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
                 stashed = liveStash;
                 focusedId = restore;
                 renderHome();
+                // Keep the sheet up through thin boot scans; dismiss only once order is restored.
+                if (!shelfReady && !rescan && shelfHasAppTiles()) hideShelfLoading();
+                // Try again shortly; the full launchable list usually appears after boot settles.
+                if (rescan) handler.postDelayed(() -> {
+                    if (movingId == null && !isFinishing()) reloadApps();
+                }, 2_000L);
             });
         });
     }
 
     private void renderHome() {
-        autoStashOverflow();
+        // While the boot sheet is up, keep the grid empty so "更多" does not appear alone.
+        if (shelfReady) autoStashOverflow();
         String restore = movingId != null ? movingId : focusedId;
         hint.setText(movingId != null ? "移动模式 · 确定保存 · 返回取消"
                 : chooseMove ? "方向键选择 · 确定选择要移动的应用 · 返回退出"
                 : "方向键选择 · 确定打开 · 长按确定 / 菜单键编辑应用 · 长按顶部设置更换壁纸");
-        List<String> visible = visibleOrder();
+        List<String> visible = shelfReady ? visibleOrder() : Collections.emptyList();
         adapter.submit(visible);
         updateTileMetrics();
+        if (!shelfReady) {
+            showFocusedName(null);
+            return;
+        }
         if (visible.isEmpty()) {
             showFocusedName(null);
             btnSettings.requestFocus();
@@ -451,6 +554,45 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
     private boolean isTopBar(View view) {
         return view == btnInputs || view == btnWifi || view == btnReorder
                 || view == btnLibrary || view == btnSettings;
+    }
+
+    /** Visible top-bar pills in left→right order (hidden wifi / library / reorder skipped). */
+    private List<View> visibleTopBarButtons() {
+        List<View> buttons = new ArrayList<>();
+        for (View button : new View[]{btnInputs, btnWifi, btnReorder, btnLibrary, btnSettings}) {
+            if (button != null && button.getVisibility() == View.VISIBLE) buttons.add(button);
+        }
+        return buttons;
+    }
+
+    /**
+     * At the ends of the top bar, Left/Right wraps to the other end instead of leaving the row.
+     * @return true when the key was handled (wrap); false lets focus move to the neighbour pill.
+     */
+    private boolean wrapTopBarFocus(View focused, boolean right) {
+        List<View> buttons = visibleTopBarButtons();
+        int at = buttons.indexOf(focused);
+        if (at < 0 || buttons.size() < 2) return false;
+        if (right && at == buttons.size() - 1) {
+            buttons.get(0).requestFocus();
+            return true;
+        }
+        if (!right && at == 0) {
+            buttons.get(buttons.size() - 1).requestFocus();
+            return true;
+        }
+        return false;
+    }
+
+    /** Up from the middle shelf: restore the last top-bar pill, else the rightmost visible one. */
+    private void focusTopBarFromShelf() {
+        List<View> buttons = visibleTopBarButtons();
+        if (buttons.isEmpty()) return;
+        View target = lastTopBarFocus;
+        if (target == null || target.getVisibility() != View.VISIBLE || !buttons.contains(target)) {
+            target = buttons.get(buttons.size() - 1);
+        }
+        target.requestFocus();
     }
 
     /** Apps still on the two-row shelf (not put into More). */
