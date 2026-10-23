@@ -25,6 +25,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.graphics.Outline;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -187,19 +188,20 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         View.OnKeyListener topKeys = (view, key, event) -> {
             if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
             lastTopBarFocus = view;
-            // Top bar stays on the top bar for Left/Right (with wrap); Up does nothing.
-            if (key == KeyEvent.KEYCODE_DPAD_UP) return true;
             if (key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT) {
                 return wrapTopBarFocus(view, key == KeyEvent.KEYCODE_DPAD_RIGHT);
             }
-            if (key != KeyEvent.KEYCODE_DPAD_DOWN) return false;
-            // Down leaves the top bar for the middle shelf.
-            if (adapter.getItemCount() == 0) return true;
-            String id = focusedId != null ? focusedId : (order.isEmpty() ? null : order.get(0));
-            if (id == null) id = adapter.idAt(0);
-            if (id != null) focusApp(id);
-            else grid.requestFocus();
-            return true;
+            // Cycle: top bar → shelf row 0 → shelf bottom row → top bar.
+            // Down enters the first shelf row; Up enters the bottom shelf row.
+            if (key == KeyEvent.KEYCODE_DPAD_DOWN) {
+                focusShelfRowFromTopBar(true);
+                return true;
+            }
+            if (key == KeyEvent.KEYCODE_DPAD_UP) {
+                focusShelfRowFromTopBar(false);
+                return true;
+            }
+            return false;
         };
         for (View button : new View[]{btnInputs, btnWifi, btnReorder, btnLibrary, btnSettings})
             button.setOnKeyListener(topKeys);
@@ -356,8 +358,8 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
     }
 
     /**
-     * Middle shelf: Left/Right wrap only among shelf tiles; Down stays in the shelf;
-     * Up moves within the shelf or, from the top shelf row, enters the top bar.
+     * Vertical cycle: top bar ↔ first shelf row ↔ bottom shelf row.
+     * Left/Right wrap only within the current shelf row band / top bar.
      */
     @Override public boolean onShelfKey(int position, int key, KeyEvent event) {
         if (movingId != null || chooseMove) return false;
@@ -373,16 +375,6 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         if (focusable.isEmpty()) return false;
         int at = focusable.indexOf(position);
         if (at < 0) return false;
-        if (key == KeyEvent.KEYCODE_DPAD_UP) {
-            int above = position - columns;
-            if (above >= 0 && !NewHomeAdapter.isEmpty(adapter.idAt(above))) {
-                if (event.getAction() == KeyEvent.ACTION_DOWN) focusApp(adapter.idAt(above));
-                return true;
-            }
-            // Top shelf row → top bar (not wrap within the shelf).
-            if (event.getAction() == KeyEvent.ACTION_DOWN) focusTopBarFromShelf();
-            return true;
-        }
         if (event.getAction() != KeyEvent.ACTION_DOWN) return true;
         if (key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT) {
             int delta = key == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1;
@@ -390,20 +382,64 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
             focusApp(adapter.idAt(next));
             return true;
         }
-        // Down: same column if occupied, else last focusable on the row below; never leave shelf.
+        int row = position / columns;
+        int col = position % columns;
+        if (key == KeyEvent.KEYCODE_DPAD_UP) {
+            int above = position - columns;
+            if (above >= 0 && !NewHomeAdapter.isEmpty(adapter.idAt(above))) {
+                focusApp(adapter.idAt(above));
+                return true;
+            }
+            int best = nearestOnRow(focusable, row - 1, col);
+            if (best >= 0) {
+                focusApp(adapter.idAt(best));
+                return true;
+            }
+            // First middle row → top bar.
+            focusTopBarFromShelf();
+            return true;
+        }
+        // Down → next shelf row, or from the bottom middle row → top bar.
         int below = position + columns;
         if (below < adapter.getItemCount() && !NewHomeAdapter.isEmpty(adapter.idAt(below))) {
             focusApp(adapter.idAt(below));
             return true;
         }
-        for (int i = focusable.size() - 1; i >= 0; i--) {
-            int pos = focusable.get(i);
-            if (pos / columns > position / columns) {
-                focusApp(adapter.idAt(pos));
-                return true;
+        int best = nearestOnRow(focusable, row + 1, col);
+        if (best >= 0) {
+            focusApp(adapter.idAt(best));
+            return true;
+        }
+        focusTopBarFromShelf();
+        return true;
+    }
+
+    /** Closest focusable on {@code row} to {@code col}, or -1 when that row has none. */
+    private int nearestOnRow(List<Integer> focusable, int row, int col) {
+        if (row < 0) return -1;
+        int best = -1;
+        int bestDist = Integer.MAX_VALUE;
+        for (int pos : focusable) {
+            if (pos / columns != row) continue;
+            int dist = Math.abs(pos % columns - col);
+            if (dist < bestDist || (dist == bestDist && pos > best)) {
+                bestDist = dist;
+                best = pos;
             }
         }
-        return true;
+        return best;
+    }
+
+    private int firstShelfRow(List<Integer> focusable) {
+        int min = Integer.MAX_VALUE;
+        for (int pos : focusable) min = Math.min(min, pos / columns);
+        return min == Integer.MAX_VALUE ? 0 : min;
+    }
+
+    private int lastShelfRow(List<Integer> focusable) {
+        int max = 0;
+        for (int pos : focusable) max = Math.max(max, pos / columns);
+        return max;
     }
 
     private List<Integer> focusablePositions() {
@@ -591,7 +627,7 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         return false;
     }
 
-    /** Up from the middle shelf: restore the last top-bar pill, else the rightmost visible one. */
+    /** From the middle shelf: restore the last top-bar pill, else the rightmost visible one. */
     private void focusTopBarFromShelf() {
         List<View> buttons = visibleTopBarButtons();
         if (buttons.isEmpty()) return;
@@ -600,6 +636,24 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
             target = buttons.get(buttons.size() - 1);
         }
         target.requestFocus();
+    }
+
+    /**
+     * From the top bar into the shelf.
+     * @param firstRow true = Down → middle first row; false = Up → middle bottom row
+     */
+    private void focusShelfRowFromTopBar(boolean firstRow) {
+        List<Integer> focusable = focusablePositions();
+        if (focusable.isEmpty()) return;
+        int col = 0;
+        if (focusedId != null) {
+            int prev = adapter.indexOf(focusedId);
+            if (prev >= 0) col = prev % columns;
+        }
+        int row = firstRow ? firstShelfRow(focusable) : lastShelfRow(focusable);
+        int best = nearestOnRow(focusable, row, col);
+        if (best < 0) best = focusable.get(firstRow ? 0 : focusable.size() - 1);
+        focusApp(adapter.idAt(best));
     }
 
     /** Apps still on the two-row shelf (not put into More). */
@@ -905,10 +959,22 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         if (grid.computeVerticalScrollOffset() != 0) {
             ((GridLayoutManager) grid.getLayoutManager()).scrollToPositionWithOffset(0, 0);
         }
-        // Line the title up with the first tile's left edge (list padding + cell margin).
-        int edge = grid.getPaddingLeft() + gap;
-        title.setPaddingRelative(edge, title.getPaddingTop(), edge, title.getPaddingBottom());
+        updateTitleFirstTileAlign();
         updateTitleShelfOffset();
+    }
+
+    /**
+     * Centers the shelf title over the leftmost tile (icon is centered in that cell).
+     */
+    private void updateTitleFirstTileAlign() {
+        if (title == null || shelfTileSize <= 0) return;
+        title.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        int tileCenter = grid.getPaddingLeft() + shelfGap + shelfTileSize / 2;
+        String text = title.getText() == null ? "" : title.getText().toString();
+        float textW = title.getPaint().measureText(text);
+        int padStart = Math.max(0, Math.round(tileCenter - textW / 2f));
+        int padEnd = grid.getPaddingRight() + shelfGap;
+        title.setPaddingRelative(padStart, title.getPaddingTop(), padEnd, title.getPaddingBottom());
     }
 
     /**
@@ -956,9 +1022,10 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         if (movingId != null) {
             NewHomeApps.Entry moving = apps.get(movingId);
             title.setText(moving == null ? "移动应用" : moving.label);
-            return;
+        } else {
+            title.setText(label == null || label.isEmpty() ? "你的应用" : label);
         }
-        title.setText(label == null || label.isEmpty() ? "你的应用" : label);
+        updateTitleFirstTileAlign();
     }
 
     private boolean onCardKey(NewHomeApps.Entry app, int key, KeyEvent event) {
