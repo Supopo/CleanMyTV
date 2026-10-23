@@ -425,9 +425,13 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
         if (config != null) for (int key : config.settingsKeycodes) {
             if (event.getKeyCode() == key) {
+                // Previous Intent, kept for reference: it did not tell the panel which Home opened it.
+                // open(config.settingsKeyPanel
+                //         ? new Intent(this, QuickSettingsActivity.class)
+                //         : systemIntent(Settings.ACTION_SETTINGS));
                 if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled())
                     open(config.settingsKeyPanel
-                            ? new Intent(this, QuickSettingsActivity.class)
+                            ? QuickSettingsActivity.fromHome(this)
                             : systemIntent(Settings.ACTION_SETTINGS));
                 return true;
             }

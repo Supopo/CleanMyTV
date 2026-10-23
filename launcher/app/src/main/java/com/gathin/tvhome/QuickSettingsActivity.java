@@ -2,6 +2,7 @@ package com.gathin.tvhome;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -18,6 +19,12 @@ import android.widget.Toast;
  * closes the panel.
  */
 public final class QuickSettingsActivity extends Activity {
+    private static final String EXTRA_HOME_ACTIVITY = "com.gathin.tvhome.extra.HOME_ACTIVITY";
+
+    static Intent fromHome(Activity home) {
+        return new Intent(home, QuickSettingsActivity.class)
+                .putExtra(EXTRA_HOME_ACTIVITY, home.getClass().getName());
+    }
 
     @Override
     protected void onCreate(Bundle state) {
@@ -30,10 +37,23 @@ public final class QuickSettingsActivity extends Activity {
         addRow(rows, R.drawable.ic_wifi, R.string.quick_network, 0, SystemSettings.intent(this, Settings.ACTION_WIFI_SETTINGS));
         addRow(rows, R.drawable.ic_apps, R.string.quick_apps, R.string.quick_apps_hint,
                 SystemSettings.intent(this, Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS));
-        // Through Home, so it rebuilds with the new choices when Launcher settings closes.
+        // Previous fixed route, kept for reference: it sent both Home versions to NewMainActivity.
+        // addRow(rows, R.drawable.ic_home_settings, R.string.launcher_settings, 0,
+        //         new Intent(this, NewMainActivity.class).setAction(MainActivity.ACTION_LAUNCHER_SETTINGS));
+        // Through the Home that opened this panel, so it rebuilds when Launcher settings closes.
         addRow(rows, R.drawable.ic_home_settings, R.string.launcher_settings, 0,
-                new Intent(this, NewMainActivity.class).setAction(MainActivity.ACTION_LAUNCHER_SETTINGS));
+                launcherSettingsIntent());
         rows.getChildAt(0).requestFocus();
+    }
+
+    private Intent launcherSettingsIntent() {
+        String from = getIntent().getStringExtra(EXTRA_HOME_ACTIVITY);
+        // The remote service has no source Home; use this APK's current default instead.
+        ComponentName home = from == null
+                ? new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+                        .setPackage(getPackageName()).resolveActivity(getPackageManager())
+                : new ComponentName(this, from);
+        return new Intent(MainActivity.ACTION_LAUNCHER_SETTINGS).setComponent(home);
     }
 
     /** Settings pressed again while the panel is up. */

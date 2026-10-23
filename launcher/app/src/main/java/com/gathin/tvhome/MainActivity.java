@@ -1106,7 +1106,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         for (int code : settingsKeycodes) {
             if (event.getKeyCode() != code) continue;
             if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) {
-                open(settingsKeyPanel ? new Intent(this, QuickSettingsActivity.class)
+                // Previous Intent, kept for reference: it did not tell the panel which Home opened it.
+                // open(settingsKeyPanel ? new Intent(this, QuickSettingsActivity.class)
+                //         : systemIntent(Settings.ACTION_SETTINGS));
+                open(settingsKeyPanel ? QuickSettingsActivity.fromHome(this)
                         : systemIntent(Settings.ACTION_SETTINGS));
             }
             return true;
