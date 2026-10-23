@@ -104,6 +104,9 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
     private int columns;
     private float density;
     private boolean sizing;
+    /** Last shelf cell size / margin from {@link #updateTileMetrics()}. */
+    private int shelfTileSize;
+    private int shelfGap;
     private AlertDialog moreDialog;
     /** Top-bar control that had focus when Home paused (Wi‑Fi / Settings / …). */
     private View topBarResumeFocus;
@@ -307,7 +310,6 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         }
         return false;
     }
-
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
@@ -524,6 +526,7 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         List<String> visible = shelfReady ? visibleOrder() : Collections.emptyList();
         adapter.submit(visible);
         updateTileMetrics();
+        updateTitleShelfOffset();
         if (!shelfReady) {
             showFocusedName(null);
             return;
@@ -892,6 +895,8 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         int rowsBudget = grid.getHeight() - baseV * 2;
         if (rowsBudget > 0) width = Math.min(width, Math.max(dp(48), rowsBudget / HOME_ROWS - gap * 2));
         int iconSize = Math.max(dp(32), Math.round(width * 0.8f));
+        shelfTileSize = width;
+        shelfGap = gap;
         adapter.setMetrics(width, iconSize, gap);
         // Bottom-first layout uses empty spacers for the top row; keep even vertical padding.
         if (grid.getPaddingTop() != baseV || grid.getPaddingBottom() != baseV) {
@@ -903,6 +908,33 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
         // Line the title up with the first tile's left edge (list padding + cell margin).
         int edge = grid.getPaddingLeft() + gap;
         title.setPaddingRelative(edge, title.getPaddingTop(), edge, title.getPaddingBottom());
+        updateTitleShelfOffset();
+    }
+
+    /**
+     * When only the bottom shelf row has apps, an empty top row would leave the name far above
+     * the icons. Nudge the title down by one cell so spacing matches the two-row layout.
+     */
+    private void updateTitleShelfOffset() {
+        if (title == null) return;
+        float nudge = 0f;
+        if (shelfReady && shelfTileSize > 0 && shelfUsesBottomRowOnly()) {
+            nudge = shelfTileSize + shelfGap * 2f;
+        }
+        if (Math.abs(title.getTranslationY() - nudge) > 0.5f) title.setTranslationY(nudge);
+    }
+
+    /** True when bottom-first layout parked a full empty spacer row above the real tiles. */
+    private boolean shelfUsesBottomRowOnly() {
+        int count = adapter == null ? 0 : adapter.getItemCount();
+        if (count < columns) return false;
+        for (int i = 0; i < columns; i++) {
+            if (!NewHomeAdapter.isEmpty(adapter.idAt(i))) return false;
+        }
+        for (int i = columns; i < count; i++) {
+            if (!NewHomeAdapter.isEmpty(adapter.idAt(i))) return true;
+        }
+        return false;
     }
 
     private boolean focusApp(String id) {

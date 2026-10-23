@@ -191,14 +191,14 @@
             </LinearLayout>
         </RelativeLayout>
 
-        <!-- Title stays fixed; only the grid below it scrolls. -->
+        <!-- Title may translate down over an empty top grid row when only the bottom row has apps. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_marginTop="20dp"
             android:layout_weight="1"
-            android:clipChildren="true"
-            android:clipToPadding="true"
+            android:clipChildren="false"
+            android:clipToPadding="false"
             android:orientation="vertical">
 
             <TextView
@@ -206,7 +206,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="40dp"
                 android:layout_marginBottom="8dp"
-                android:elevation="2dp"
+                android:elevation="4dp"
                 android:ellipsize="end"
                 android:fontFamily="@font/outfit_medium"
                 android:gravity="center_vertical"
