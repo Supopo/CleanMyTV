@@ -1144,7 +1144,7 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
     private void showLibrary() {
         if (library != null) library.close();
         library = new AppLibraryDialog(this, config.animations, config.reducedMotion,
-                config.appLibrarySelection,
+                config.appLibrarySelection, config.libraryOkOpens,
                 pkg -> {
                     for (NewHomeApps.Entry app : apps.values())
                         if (app.packageName.equals(pkg)) return true;
