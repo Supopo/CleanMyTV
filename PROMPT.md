@@ -17,6 +17,10 @@ adapter on that port can drop the same way, so plan to do the whole session in o
 I want to debloat my Android TV and replace its launcher with a clean Apple TV style home screen.
 My TV model is: <MODEL NAME HERE>. Work on the real device, step by step, and verify everything you
 do with screenshots pulled from the TV. Ask me before anything that depends on my preferences.
+Where these steps name a file under `tools/`, `docs/` or `examples/` that is not in your working
+folder, you are running without this repo: clone it first with
+`git clone https://github.com/Gathin23/cleanyourtv` and work from there, so `tools/disable.sh` and the
+rest keep their safety checks, rather than stopping or writing your own.
 
 Connect
 - Find the TV on my network (hostname, ARP table, or ask me for the IP) and connect over ADB on port 5555.
@@ -33,6 +37,8 @@ Connect
   `_adb-tls-connect._tcp` with `dns-sd -B` or `adb mdns services`, ask me for the code and port under
   Developer options > Wireless debugging > Pair device with pairing code, then `adb pair`, `adb connect`
   and `adb tcpip 5555`. Android switches Wireless debugging off whenever Wi-Fi drops.
+  Some firmware runs network ADB on another fixed port instead (a projector used 5877): if 5555 refuses and
+  nothing advertises Wireless debugging, scan the TV's own TCP ports and try each open one with `TV_PORT`.
 - Tell me when the "Allow USB debugging?" prompt will appear on the TV so I can accept it.
 - If `adb install` hangs on Android 14 it is waiting for an on-screen confirmation; push the APK and run
   `pm install -r` over the shell instead.
@@ -94,11 +100,17 @@ Debloat
   it and you cannot tell which.
 - After the last batch, reboot once and compare `pm list packages -d` with what you disabled: some
   firmware re-enables packages at every boot from its own list (TCL Android 9 does this for its user
-  center). Note those in the list header instead of disabling them again after each boot.
+  center). Note those in the list header instead of disabling them again after each boot. If
+  setupwraith or the stock launcher came back and Home is black, check `logcat | grep
+  RecoveryActivity` and re-enable the stock launcher before anything else
+  (`docs/devices/acer-r4g.md`).
 - Offer me ad-blocking DNS as an optional extra: on Android 9 and newer, Private DNS set to an
   ad-blocking resolver (`settings put global private_dns_specifier dns.adguard-dns.com`, then
   `settings put global private_dns_mode hostname`). Tell me it doesn't block YouTube ads, check an app
   still plays afterwards, and note the undo (`private_dns_mode opportunistic`) in the README.
+  Ask me first whether my router already filters or routes traffic by domain through its own DNS
+  (Pi-hole, AdGuard Home, a VPN with domain lists, a fake-IP proxy): Private DNS goes around it, so those
+  rules stop applying to the TV, and blocking on the router is the better choice there.
 
 Launcher
 - Check that the TV accepts APKs before building anything. Some China-market sets answer every
@@ -148,9 +160,16 @@ Launcher
   A button the TV logs as `KEY_UNKNOWN` or `KEY_PROGRAM` cannot be matched by keycode, since every
   unmapped button shares it: read the scancode with `getevent -lt` and use `settings_key_scancodes`,
   which only `config.xml` carries (a theme can set keycodes, not scancodes).
+- After the first reboot with the new Home, check what the TV opens at power-on
+  (`logcat -b events -d | grep wm_set_resumed_activity`). If the firmware puts the Live TV app on screen by
+  itself, ask me which I want to land on, Home or Live TV: Home is `power_on_home` with HOME_KEY_SERVICE=1,
+  Live TV is `boot_to_live_tv` (`config.xml` or the theme). Never set both.
 - On Android 11 and newer the launcher must declare `<queries>` for `android.intent.category.LEANBACK_LAUNCHER`,
   or package visibility silently hides every app and the grid comes up empty; target a recent SDK, some
   Google TV 14 sets refuse older targets at install.
+- If you write the launcher yourself, make its theme explicitly opaque (`windowIsTranslucent`,
+  `windowIsFloating` and `windowSwipeToDismiss` false): on some firmware `Theme.DeviceDefault` comes out
+  translucent, the TV app keeps running under Home, and after an HDMI input the picture stays on screen.
 - Ask how many dock slots I want (4, 5, 6 or 7), which apps, and their order; keep four if I have no
   preference. The reference launcher already supports this: use `columns` and `dock_apps` in
   `launcher/app/src/main/res/values/config.xml` or a theme's `config.json`, without adding a new layout.
@@ -174,7 +193,10 @@ Verify
   Fix what you see before moving on.
 - Live TV, HDMI and some streaming apps (Netflix) give empty screenshots (0 bytes); that is the TV, not a
   broken debloat, and `--screenshot` exits 1 with that message. Check
-  `dumpsys activity activities | grep topResumedActivity` instead (see `docs/TROUBLESHOOTING.md`).
+  `dumpsys activity activities | grep -i ResumedActivity` instead (some builds print no `topResumedActivity`
+  line but do print `mResumedActivity`; see `docs/TROUBLESHOOTING.md`).
+- If screenshots keep showing an app you already left, byte for byte, `screencap` is returning its last
+  frame: confirm `mCurrentFocus` in `dumpsys window`, force-stop that app and capture again.
 - If the screen looks enlarged and clipped after an install or a reboot, check the display overrides
   before editing the launcher grid: `wm size` and `wm density` show a physical value next to an
   override, and an override left over from an old resolution experiment, or a density that comes back

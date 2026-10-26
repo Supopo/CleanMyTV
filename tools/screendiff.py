@@ -13,6 +13,7 @@ Boxes are x0,y0,x1,y1 in the screenshots' pixels. Exit status: 0 identical, 1 di
 Needs Pillow (tools/requirements-perf.txt). Read tools/screendiff.md first.
 """
 import argparse
+from pathlib import Path
 import re
 import sys
 
@@ -29,8 +30,48 @@ def box(text):
     return x0, y0, x1, y1
 
 
+def output_path(option, path):
+    """The file a picture will be written to, checked before the screenshots are read.
+
+    Exit status 1 is 'the two screenshots differ', a finding the reader acts on, so a folder typed wrong
+    must not come back as one: --out and --diff are judged here, before the images are opened and before
+    Pillow is imported, and a path that cannot be written is named rather than attempted.
+    """
+    if not path:
+        return None
+    target = Path(path)
+    if target.is_dir():
+        raise ValueError(f"{option} {path} is a folder, so nothing could be written there: "
+                         f"name the file, e.g. --out shots/before-after.png")
+    if not target.parent.is_dir():
+        if target.parent.is_file():
+            raise ValueError(f"{option} {path}: {target.parent} is a file, not a folder")
+        raise ValueError(f"{option} {path}: there is no folder {target.parent} - create it first")
+    if not target.suffix:
+        raise ValueError(f"{option} {path} has no extension, so its format is unknown: name it {path}.png")
+    return target
+
+
+def write(image, path):
+    """Save one picture, naming the path and the reason if it cannot be written.
+
+    Pillow answers an unwritable destination with OSError and an extension it does not know with
+    ValueError; either left alone ends the run in a traceback with exit 1, the status the page reads as
+    'the screenshots differ'.
+    """
+    try:
+        image.save(path)
+    except (OSError, ValueError) as e:
+        raise ValueError(f"cannot write {path}: {getattr(e, 'strerror', None) or e}") from e
+
+
 def compare(a, b, masks, threshold):
     """(pixels that differ by more than threshold in any channel, their bounding box or None, the largest difference)."""
+    return _compare(a, b, masks, threshold)[:3]
+
+
+def _compare(a, b, masks, threshold):
+    """The comparison numbers and the binary pixel mask they describe."""
     from PIL import ImageChops, ImageDraw
     a, b = a.convert("RGB").copy(), b.convert("RGB").copy()
     for im in (a, b):
@@ -43,7 +84,7 @@ def compare(a, b, masks, threshold):
     worst = ImageChops.lighter(ImageChops.lighter(r, g), bl)
     over = worst.point(lambda v: 255 if v > threshold else 0)
     count = over.histogram()[255]
-    return count, over.getbbox(), max(worst.getdata())
+    return count, over.getbbox(), max(worst.getdata()), over
 
 
 def redact(im, region):
@@ -101,6 +142,12 @@ def parse(argv):
 
 def main(argv=None):
     args = parse(sys.argv[1:] if argv is None else argv)
+    for option, path in (("--out", args.out), ("--diff", args.diff)):
+        try:
+            output_path(option, path)
+        except ValueError as e:
+            print(f"{e}. Nothing was read or written.", file=sys.stderr)
+            return 2
     try:
         from PIL import Image
     except ImportError:
@@ -118,13 +165,20 @@ def main(argv=None):
     if outside:
         print(f"a box is outside the {a.size[0]}x{a.size[1]} screenshot: {outside[0]}", file=sys.stderr)
         return 2
-    count, bbox, worst = compare(a, b, args.mask, args.threshold)
+    count, bbox, worst, diff = _compare(a, b, args.mask, args.threshold)
     if args.out:
-        pair(a, b, args.blur, args.label_pair, args.scale).save(args.out)
+        try:
+            write(pair(a, b, args.blur, args.label_pair, args.scale), args.out)
+        except ValueError as e:
+            print(f"{e}. The comparison was not reported.", file=sys.stderr)
+            return 2
         print(f"{args.out}: written")
     if args.diff:
-        from PIL import ImageChops
-        ImageChops.difference(a.convert("RGB"), b.convert("RGB")).point(lambda v: 255 if v > args.threshold else 0).save(args.diff)
+        try:
+            write(diff, args.diff)
+        except ValueError as e:
+            print(f"{e}. The comparison was not reported.", file=sys.stderr)
+            return 2
     masked = f" ({len(args.mask)} region{'s' if len(args.mask) != 1 else ''} masked)" if args.mask else ""
     if count == 0:
         print(f"identical{masked}: no pixel differs by more than {args.threshold}")

@@ -92,10 +92,12 @@ def recording_ms(steps):
 def scenario(name, launcher_component, other_component, setup=(), steps=()):
     """(setup, steps) shell commands for a scenario. Setup runs before the recording starts."""
     package = launcher_component.split("/")[0]
-    other = f"am start -n {other_component}" if other_component else None
+    # Reuse the other activity across runs instead of growing its task history.
+    other = f"am start --activity-reorder-to-front -n {other_component}" if other_component else None
     if name == "cold":
         return [other, "sleep 2", f"am force-stop {package}", "sleep 2"], \
-               [f"am start -W -n {launcher_component}", "sleep 4"]
+               [f"am start -W -a android.intent.action.MAIN "
+                f"-c android.intent.category.HOME -n {launcher_component}", "sleep 4"]
     if name == "coldsys":
         return ["input keyevent KEYCODE_HOME", "sleep 2"], [f"am force-stop {package}", "sleep 5"]
     if name == "home":
@@ -231,7 +233,7 @@ def main(argv=None):
                 bench.restore_accessibility(_Shell(shell), args.package, helpers)
     finally:
         dev.close()
-    print(f"next: tools/trace_report.py {args.out}   (see tools/trace.md)")
+    print(f"next: tools/venv/bin/python -I tools/trace_report.py {args.out}   (see tools/trace.md)")
 
 
 class _Shell:

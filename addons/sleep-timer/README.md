@@ -5,7 +5,11 @@ out. One minute before, a small countdown shows over whatever is playing with **
 **Turn off now**; if nobody answers, the TV goes to standby. Back leaves the warning but not the timer.
 
 Package `io.github.luyzfernando08.sleeptimer`. You see it as **Sleep Timer** (Portuguese: **Desligar**). On
-cleanyourtv's Home it is also a module card, **Sleep Timer**, which opens the picker; the picker shows when the
+cleanyourtv's Home it is also a module card, **Sleep Timer**, which opens the picker. A remote button mapped to
+its quick bar (the launcher's `app_keys`: `hold:178:io.github.luyzfernando08.sleeptimer/.QuickActivity`) opens a
+small bar at the bottom over whatever is playing: Left/Right pick the time, OK closes it. `.BedtimeActivity` in its
+place is bedtime in one press: a 30-minute timer plus the Brightness add-on's night mode when it is installed, both
+off again on the next press. The picker shows when the
 TV will turn off and can cancel the timer.
 
 ## How it turns the TV off
@@ -47,10 +51,13 @@ it without waiting, the first lines of `build-and-install.sh` have an adb comman
   app open its warning from the background when it holds this. The app draws no overlay window.
 - **Exact alarms** (`SCHEDULE_EXACT_ALARM`), granted with `appops` where it exists (Android 12+), so the
   timer fires on the minute; without it the alarm may come a few minutes late.
+- **Auto-start** (`AUTO_START` or `APP_AUTO_START`, TCL only), granted with `appops` and saved with
+  `appops write-settings`: TCL's TclAppBoot otherwise refuses to bind `SleepService` while the app is not
+  running, so the timer ends without putting the TV to standby. Other TVs do not have the op and ignore it.
 - No network, no storage permission, no background service: between setting the timer and its end there are
   two alarms and nothing running.
 - **`AlarmReceiver`** is exported only to callers holding `WRITE_SECURE_SETTINGS`, which the adb shell has and
-  ordinary apps cannot get, for the test action above. **`TimerActivity`** (exported) is the tile and the card.
+  ordinary apps cannot get, for the test action above. **`TimerActivity`** (exported) is the tile and the card; `QuickActivity` and `BedtimeActivity` (exported) answer a remote button.
 
 ## Tested on
 

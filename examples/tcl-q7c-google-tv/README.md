@@ -24,7 +24,10 @@ and it is not needed.
 
 The order matters: setupwraith goes while Google TV's home still owns Home, then `build-and-install.sh` starts the
 new launcher and only then disables launcherx. `disable.sh` skips launcherx on the first run (its Home guard), which
-is what you want here.
+is what you want here, as long as no other launcher is installed: the guard holds launcherx back only when nothing
+else could answer Home, so with Projectivy or another launcher on the TV it disables launcherx in the same run, and
+that launcher takes Home until `build-and-install.sh` (with `STOCK_LAUNCHER=none`, since it does not know that
+launcher) makes the new one Home. Seen on a G08 EU unit, [tcl-g08-eu-android12](../tcl-g08-eu-android12/).
 
 ```bash
 FORCE_SETUPWRAITH=1 TV_HOST=<tv-ip> tools/disable.sh examples/tcl-q7c-google-tv/debloat.txt
@@ -280,3 +283,177 @@ removed the paired computer, switched Wireless debugging and USB debugging off, 
   not tested after the list. Live TV and YouTube were opened, not watched for long.
 - Standby/wake, a cold boot from mains, and a firmware update are untested.
 - The volume repeat was measured with both helpers bound only. No bisect, and no `key_filter` false run.
+
+## Third unit: 55Q6C (Vietnam, Wi-Fi)
+
+One owner's session on 2026-10-23, following [`PROMPT.md`](../../PROMPT.md) on macOS with Claude Code. `tools/tv.py
+--probe` reported `Smart TV Pro`, device `G08`, Android 14 (SDK 34), `tcl9618-user 14 UTT2.250416.001 AU02
+release-keys` and `ro.adb.secure = 1`: the same pair as this folder.
+
+### Connecting
+
+- Wireless debugging only, as on the 65Q7D. macOS Local Network privacy blocked every connection from the agent's
+  own shell ("No route to host", even to the router). Pairing (`adb pair`) and the first `adb connect` were run from
+  an ordinary terminal; that started the adb server there, after which the agent's `adb` reached the TV through it.
+  `adb tcpip 5555`, then `adb forward tcp:15555 tcp:5555` with `TV_HOST=127.0.0.1 TV_PORT=15555` gave `tools/` a
+  connection, without `tools/relay.py`. The forward dropped once and had to be set again.
+- Port 5555 stayed open across both reboots in this session, until debugging was switched off.
+
+### The list as applied
+
+24 packages in four batches with a screenshot after each: this list minus the owner's keeps (Google voice
+`katniss`, AirPlay's three packages, `miracast`, Netflix and its token manager, `ui_mediaCenter` for a USB drive,
+`t_solo`, `hearaid` and `UpdatePeripheral` for TCL speakers), plus `com.google.android.youtube.tvmusic`.
+`com.tcl.magiconnectfree` was already disabled when the session started. After two reboots `pm list packages -d`
+still listed all 25, none came back.
+
+### Home without disabling setupwraith
+
+The saved Wi-Fi belonged to setupwraith (`cname=com.google.android.tungsten.setupwraith`), and the owner uses
+Chromecast, whose credentials come from setupwraith (`docs/TROUBLESHOOTING.md`). The first
+`launcher/build-and-install.sh` run rolled back as designed: Home resolved to `setupwraith/.RecoveryActivity`.
+
+Instead of disabling setupwraith, both it and launcherx stayed enabled and the launcher took Home through
+`stock_home_redirect`:
+
+- `config.xml`: `stock_home_redirect` `com.google.android.apps.tv.launcherx`, `settings_key_keycodes` `[83]`,
+  `app_keys` `190:com.google.android.youtube.tv` and `4062:com.netflix.ninja`, `live_tv_package` `com.tcl.tv`.
+- `STOCK_LAUNCHER=none launcher/build-and-install.sh` installs it and leaves launcherx alone. Its Home check then
+  reports launcherx, which is expected here; `HomeKeyService` was enabled afterwards the same way the script does.
+- Home from inside YouTube landed on `com.gathin.tvhome/.MainActivity` (`mFocusedApp`), and after a reboot the TV
+  started straight into it. Launcherx flashes for a moment before the redirect.
+- The owner pressed Home, Settings, YouTube, Netflix and Input on the real remote: all worked. Holding volume up
+  kept ramping with `HomeKeyService` bound and `key_filter` true, so the G09 repeat loss did not show on this set.
+
+### TclAppBoot after a reboot
+
+After the first reboot `HomeKeyService` was enabled but unbound, `accessibility_enabled` read `0`, and logcat had
+`[TclAppBoot]:forbid bind service ComponentInfo{com.gathin.tvhome/com.gathin.tvhome.HomeKeyService}`.
+`appops get com.gathin.tvhome` showed `AUTO_START: ignore`: the install script's `cmd appops set ... AUTO_START
+allow` had not reached the disk. `appops set com.gathin.tvhome AUTO_START allow; appops write-settings`, then
+clearing and rewriting the enabled list, bound the helper, and it bound on its own after the next reboot. The Sleep
+Timer add-on needed the same op (`AUTO_START` here, not `APP_AUTO_START`).
+
+### AirPlay and Cast on this network
+
+AirPlay (Settings > System > AirPlay and HomeKit Settings) was on and listening on port 7000, yet an iPhone found
+neither AirPlay nor Cast while the TV and phone were on the router's 5 GHz network (a VNPT iGate GW020-H, whose
+pages offer no isolation or multicast setting). With both on its 2.4 GHz network the TV appeared in Screen
+Mirroring. That is the router, not the debloat: nothing AirPlay-related was disabled.
+
+### Test limits
+
+- One set, one session, two reboots. Nothing here has been lived with for several days.
+- HDMI inputs and the tuner were not used after the list; Live TV opened.
+- Private DNS (`dns.adguard-dns.com`) validated and FPT Play loaded; no long playback test.
+
+## Fourth unit: 65T8C (Wi-Fi)
+
+One owner's session on 2026-10-23, following [`PROMPT.md`](../../PROMPT.md) on Linux with Google's platform-tools
+`adb` and launcher 2.6. Same build as the Q7C (`G08_4K_GB`, `UTT2.250416.001 AU02`, `ro.software.version_id`
+`V8-T653T01-LF1V643`, security patch `2025-12-05`), so `debloat.txt` here is the list to run. Packages were
+disabled by hand, one `pm disable-user` call each, in seven batches with a screenshot after each; the first 34
+were checked after one reboot. The owner then used the TV for a few days with nothing broken or re-enabled. Nothing
+was added to `debloat.txt` beyond a header line naming this unit; the deltas are below.
+
+| Field | Observed value |
+|---|---|
+| Retail model | `65T8C`, supplied by the owner; not exposed by `ro.product.model` (`Smart TV Pro`) |
+| `ro.hardware` / `ro.board.platform` | `mt5896` / `merak` |
+| Apps on the set | Middle East apps: OSN+, TOD, Shahid, Disney+ (`com.disneyplus.mea`), iQIYI |
+
+### What differed from the Q7C list
+
+- **Kept by choice:** AirPlay, Chromecast (mediashell), Prime Video and the game bar. The Q7C list disables AirPlay
+  and Prime Video.
+- **Also disabled, beyond the Q7C list:** `com.tcl.interactive`, `com.tcl.partnercustomizer`, `com.tcl.gallery`,
+  Shahid, Disney+ MEA, iQIYI, YouTube Music, and the TCL keyboard `com.tcl.inputmethod.international`. The TCL
+  keyboard is the default IME on this set: `ime enable` and
+  `ime set com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME` first, or nothing can type. Disabling `com.tcl.interactive` did not break the Input button here, unlike the Android 12
+  G08 list's warning.
+- **Kept:** `com.tcl.ttvs`, which carries the system update screens on this build.
+
+### Notes for this unit
+
+- **Wireless debugging only**, like the 65Q7D Pro: port 5555 was closed with USB debugging on. After a reboot,
+  Wireless debugging showed its IP address & port as "unavailable"; pairing still succeeded but every connect
+  answered `offline`. Toggling did not help; unplugging the TV at the wall did, and it came back on a new port.
+- **The saved Wi-Fi belonged to `android.uid.system`**, not setupwraith, so the wizard could be disabled without
+  losing Wi-Fi. With launcherx off and setupwraith on, `query-activities` listed setupwraith's `RecoveryActivity`
+  above the new launcher; `set-home-activity` plus disabling both made `mFocusedApp` the new launcher.
+- **Closing ADB:** with Wireless debugging off but USB debugging still on, port 5555 was open after a reboot and
+  advertised `_adb._tcp`. Switching USB debugging off and rebooting closed it (`tools/adb-closed.py`).
+- **Checked with the real remote:** Home, the app buttons, Input, Settings and holding volume all worked with the
+  new launcher and no key helpers enabled.
+
+## Additional G08 AU02 unit: native shortcuts and held-volume repeat
+
+One `Smart TV Pro`, device `G08`, product `G08_4K_GB`, Android TV 14 (SDK 34), build
+`tcl9618-user 14 UTT2.250416.001 AU02 release-keys`. The retail model was not confirmed. The owner tested
+launcher 2.7 from macOS on 2026-10-23; [issue #1292](https://github.com/Gathin23/cleanyourtv/issues/1292)
+records the result.
+
+With `com.google.android.apps.tv.launcherx` disabled, the real remote's Netflix (`4062`), Prime Video (`4099`)
+and YouTube (`190`) buttons stopped opening their apps. Disney+ and Globoplay buttons still worked.
+Enabling `HomeKeyService` with key filtering restored the failed shortcuts, but holding volume then moved
+it one step per press, as in [the G09 key-repeat note](../../docs/devices/tcl-55p71b-g09-key-repeat.md).
+
+### Working alternative: Google TV handles the app buttons
+
+Keeping launcherx enabled and redirecting its Home windows let the owner keep those shortcuts and held-volume
+repeat together. The two settings for this mode were:
+
+```json
+{
+  "key_filter": false,
+  "stock_home_redirect": "com.google.android.apps.tv.launcherx"
+}
+```
+
+- Leave `com.google.android.apps.tv.launcherx` enabled, unlike the standard install above. Google TV's native
+  receiver handles the app buttons; `app_keys` in a key-filtering helper is not what restores them here.
+- Enable only `com.gathin.tvhome/.HomeKeyService`, with `InputKeyService` off. The Home helper observes window
+  changes without filtering keys. Android still resolves Google TV as Home; the helper opens Clean Your TV.
+- Allow `AUTO_START` for `com.gathin.tvhome` and persist it with `appops write-settings`, as in
+  [TclAppBoot after a reboot](#tclappboot-after-a-reboot).
+- On this unit setupwraith stayed disabled after the owner forgot and rejoined Wi-Fi in Settings. The saved
+  network then belonged to `com.android.tv.settings`; this differs from the third unit, which kept the wizard.
+
+### Verification and limits
+
+The owner pressed Home, Netflix, Prime Video and YouTube on the physical remote: Home returned to Clean Your TV,
+the three apps opened, and held volume changed continuously.
+
+After a reboot, before injecting navigation keys, the focused app was `com.gathin.tvhome/.MainActivity`.
+`dumpsys accessibility` showed only `HomeKeyService` bound, with `TYPE_WINDOW_STATE_CHANGED`, and no
+`KeyboardInterceptor`. The helper also remained bound after a later `tools/theme.sh` push.
+
+Keeping Google TV enabled retains its process and can briefly show the stock Home during startup before the
+redirect. This is a compatibility alternative to disabling launcherx. The owner later chose direct Home with
+launcherx disabled, accepting the lost shortcuts.
+
+One unit, one firmware and one setup session, including a checked reboot of the redirect configuration.
+This does not establish long-term stability or validate the folder's full debloat list. No packages were added
+to `debloat.txt` for this report.
+## Fifth unit: G08 EU/UK, OTA from Android 12
+TCL Smart TV Pro, product `G08_4K_GB`, firmware `UTT2.250416.001 AU02`, EU/UK unit on Ethernet with a custom
+launcher (launcherx and setupwraith off). This set is the source of the groups marked "fifth unit" in
+`debloat.txt`; it OTA'd from Android 12 (the Android 12 list of this exact set, PR #657) to Android 14 on
+21 October 2026, and its Android 12 debloat entries were audited against the OTA.
+- **OTA survival:** no disabled package came back from the update. The OTA newly installed `com.tcl.channelplus`
+  (in the list) — re-run `tools/disable.sh` after every update, it will pick up the new packages on the list.
+- `com.iplayer.android.webview` from the Android 12 firmware is gone from this build.
+- **Source key / QuickPanel:** the remote Source key is keycode 178 (`KEYCODE_TV_INPUT`). With launcherx gone,
+  `com.tcl.suspension` draws the source QuickPanel itself (`input keyevent 178` → `QuickPanelDialog` in logcat,
+  confirmed with the real remote). The DO-NOT-DISABLE set for this: `com.tcl.autopair`, `com.tcl.suspension`,
+  `com.tcl.interactive`, `com.tcl.ttvs` — disabling them shows the known ~10 Hz NPE storm in logcat.
+- **`com.tcl.ttvs` is not analytics-only:** on a related AU04 G08 unit, `dumpsys package com.tcl.ttvs` lists
+  firmware-update components (`versionUpdateApp` `SystemUpdateActivity`, `NetworkUpdateActivity`,
+  `SystemUpdateReceiver`, package `10.60.15_422bf21_260617_overseaTV`) — check the package before treating it
+  as telemetry. (Report from PR #1085's unit; left enabled there.)
+- **Kept enabled:** the TCL keyboard `com.tcl.inputmethod.international` and `com.tcl.browser` — the browser is
+  what the remote's Web key opens on this firmware. Verified on the set: boot, Live TV/HDMI playback, the Source
+  key panel, streaming preloads and the Google stack.
+- **Never list** `com.google.android.modulemetadata` and the `com.google.android.overlay.modules.*` overlays
+  (permissioncontroller, modulemetadata-forframework): `tools/disable.sh` refuses a list that names them
+  (brick class, #884). The Android 12 EU list named them before the tool gate existed; they are excluded here.
