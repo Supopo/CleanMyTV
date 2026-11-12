@@ -10,6 +10,7 @@
     <string name="not_connected">Ingen enhet</string>
     <string name="live_tv">Direkte-TV</string>
     <string name="no_inputs">Fant ingen innganger</string>
+    <string name="more_inputs">Flere innganger</string>
     <string name="good_morning">God morgen</string>
     <string name="good_afternoon">God ettermiddag</string>
     <string name="good_evening">God kveld</string>
@@ -109,4 +110,8 @@
     <string name="race_live">%1$s · direkte</string>
     <string name="race_finished">Målgang</string>
     <string name="last_opened">Sist åpnet %1$s</string>
+    <string name="game_live">Direkte nå</string>
+    <string name="clock_format_system">System</string>
+    <string name="clock_format_12">12 timer</string>
+    <string name="clock_format_24">24 timer</string>
 </resources>

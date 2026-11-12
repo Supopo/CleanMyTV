@@ -10,6 +10,7 @@
     <string name="not_connected">ไม่มีอุปกรณ์</string>
     <string name="live_tv">ทีวีสด</string>
     <string name="no_inputs">ไม่พบแหล่งสัญญาณ</string>
+    <string name="more_inputs">แหล่งสัญญาณเพิ่มเติม</string>
     <string name="good_morning">สวัสดีตอนเช้า</string>
     <string name="good_afternoon">สวัสดีตอนบ่าย</string>
     <string name="good_evening">สวัสดีตอนเย็น</string>
@@ -66,4 +67,8 @@
         <item quantity="other">%1$d แอป</item>
     </plurals>
     <string name="greeting_with_name">%1$s %2$s</string>
+    <string name="game_live">กำลังถ่ายทอดสด</string>
+    <string name="clock_format_system">ระบบ</string>
+    <string name="clock_format_12">12 ชั่วโมง</string>
+    <string name="clock_format_24">24 ชั่วโมง</string>
 </resources>

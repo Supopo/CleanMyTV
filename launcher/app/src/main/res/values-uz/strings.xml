@@ -10,6 +10,7 @@
     <string name="not_connected">Qurilma yoʻq</string>
     <string name="live_tv">TV kanallar</string>
     <string name="no_inputs">Manbalar topilmadi</string>
+    <string name="more_inputs">Boshqa manbalar</string>
     <string name="good_morning">Xayrli tong</string>
     <string name="good_afternoon">Xayrli kun</string>
     <string name="good_evening">Xayrli kech</string>
@@ -109,4 +110,8 @@
     <string name="race_live">%1$s · jonli</string>
     <string name="race_finished">Marra</string>
     <string name="last_opened">Oxirgi marta ochilgan: %1$s</string>
+    <string name="game_live">Hozir jonli</string>
+    <string name="clock_format_system">Tizim</string>
+    <string name="clock_format_12">12 soatlik</string>
+    <string name="clock_format_24">24 soatlik</string>
 </resources>

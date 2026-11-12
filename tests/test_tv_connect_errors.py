@@ -5,10 +5,12 @@ restart, while tv.py connects to 5555 unless TV_HOST or TV_PORT names another po
 5555 refuses and tv.py ended with a ConnectionRefusedError traceback. Pointed at the Wireless debugging port,
 it ended with adb_shell's `InvalidCommandError: Unknown command: ... 'STLS'`: that port asks for TLS, and
 adb_shell 0.4.4 (tools/requirements.txt) has none. Neither says which port to use instead. tv.py now prints
-what happened and the way to port 5555 (pair once with the stock adb, then `adb tcpip 5555`), and exits 2.
-A key file it cannot read and a connection reset in the handshake keep their traceback: neither means the TV
-could not be reached. tv.connect() itself still raises, because check.py (through recovery.connect()) and
-privacy.py catch its errors themselves; recovery.py --save still lets them through.
+what happened, the TV_ADB_BINARY backend that can speak that TLS port without opening 5555
+(tools/native-adb.md), and the way to port 5555 (pair once with the stock adb, then `adb tcpip 5555`), and
+exits 2. A key file it cannot read and a connection reset in the handshake keep their traceback:
+neither means the TV could not be reached. tv.connect() itself still raises, because check.py
+(through recovery.connect()) and privacy.py catch its errors themselves; recovery.py --save still
+lets them through.
 
 These runs use the real adb_shell and real sockets on 127.0.0.1: a port nothing listens on, a server that
 answers the handshake with the STLS packet a Chromecast with Google TV 4K (Google TV 14) sent back on its
@@ -213,6 +215,12 @@ class TvConnectErrorTest(unittest.TestCase):
         self.assertEqual(b"CNXN", server.first[:4], "tv.py opened the ADB handshake that STLS answers")
         self.assertIn(f"127.0.0.1:{server.port} is a Wireless debugging port: it asks for TLS, which tv.py "
                       "cannot use.", result.stderr)
+        self.assertIn("TV_ADB_BINARY", result.stderr,
+                      "the port tv.py cannot speak to itself is the one TV_ADB_BINARY can, and the message "
+                      "has to name it or the reader opens the plaintext port instead (tools/native-adb.md)")
+        self.assertIn("keep TV_HOST as it is", result.stderr,
+                      "the backend takes the Wireless debugging port in TV_HOST, not port 5555")
+        self.assertIn("tools/native-adb.md", result.stderr, "the backend's guide has to be named")
         self.assertIn("`adb pair`", result.stderr)
         self.assertIn("`adb tcpip 5555`", result.stderr)
         self.assertIn("set TV_HOST to the TV's IP alone and leave TV_PORT unset", result.stderr)
@@ -233,6 +241,25 @@ class TvConnectErrorTest(unittest.TestCase):
         self.assertExplained(result)
         self.assertIn("could not reach 192.0.2.1:5555 ([Errno 65] No route to host). Is the TV on and on "
                       "this network?", result.stderr)
+
+    # RUNNER raises OSError(65, ...), and 65 is EHOSTUNREACH on macOS but ENOPKG on Linux, so this is the
+    # platform tv.py adds the Local Network note on. Skipped elsewhere rather than faked: the note exists to
+    # be read on a Mac, and a test that passed on Linux CI while failing on a contributor's Mac is worse
+    # than no test. The sentence above stays in both messages, so the test before this one covers both.
+    @unittest.skipUnless(sys.platform == "darwin", "the Local Network note is macOS-only")
+    def test_macos_adds_the_local_network_privacy_note_to_an_unreachable_host(self):
+        result = self.run_tv(["-c", RUNNER, str(self.tv), "OSError", "No route to host"], TV_HOST="192.0.2.1")
+        self.assertExplained(result)
+        self.assertIn("On macOS this is also what Local Network privacy looks like.", result.stderr)
+        # The two things a reader gets wrong: which app to allow, and whether the network is at fault.
+        self.assertIn("granting it to python or adb does nothing", result.stderr)
+        self.assertIn("try the default gateway", result.stderr)
+
+    @unittest.skipIf(sys.platform == "darwin", "the Local Network note belongs on macOS")
+    def test_other_platforms_keep_the_plain_unreachable_message(self):
+        result = self.run_tv(["-c", RUNNER, str(self.tv), "OSError", "No route to host"], TV_HOST="192.0.2.1")
+        self.assertExplained(result)
+        self.assertNotIn("Local Network privacy", result.stderr)
 
     def test_an_error_it_has_nothing_to_add_to_keeps_its_traceback(self):
         # Only the STLS answer is a Wireless debugging port; any other unknown command is left as it was.
@@ -260,7 +287,8 @@ class TvConnectErrorTest(unittest.TestCase):
             result = self.run_tv(["-c", RUNNER, str(self.tv), "PermissionError", "Permission denied", key],
                                  TV_HOST="192.0.2.1")
             self.assertKeptTraceback(result, "PermissionError")
-            self.assertIn(key, result.stderr)
+            # The traceback prints the path as a repr, which doubles the backslashes of a Windows path.
+            self.assertIn(repr(key)[1:-1], result.stderr)
 
     def test_a_connection_reset_in_the_handshake_keeps_its_traceback(self):
         server = ResetPort()

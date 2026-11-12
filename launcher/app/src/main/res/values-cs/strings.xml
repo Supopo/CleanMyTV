@@ -10,6 +10,7 @@
     <string name="not_connected">Žádné zařízení</string>
     <string name="live_tv">Televize</string>
     <string name="no_inputs">Nenašly se žádné vstupy</string>
+    <string name="more_inputs">Další vstupy</string>
     <string name="good_morning">Dobré ráno</string>
     <string name="good_afternoon">Dobré odpoledne</string>
     <string name="good_evening">Dobrý večer</string>
@@ -107,4 +108,8 @@
     </plurals>
     <string name="greeting_with_name">%1$s, %2$s</string>
     <string name="last_opened">Naposledy otevřeno: %1$s</string>
+    <string name="game_live">Právě živě</string>
+    <string name="clock_format_system">Systém</string>
+    <string name="clock_format_12">12hodinové</string>
+    <string name="clock_format_24">24hodinové</string>
 </resources>
