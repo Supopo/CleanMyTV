@@ -1152,7 +1152,7 @@ public final class NewMainActivity extends Activity implements NewHomeAdapter.Ho
                 }, this::reloadApps, () -> {
                     library = null;
                     btnLibrary.requestFocus();
-                });
+                }, new HashSet<>(config.libraryExcludedApps));
         library.show();
     }
 

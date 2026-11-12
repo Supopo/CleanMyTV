@@ -104,6 +104,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private static final int LAUNCHER_SETTINGS_REQUEST = 42;
     /** Sent by QuickSettingsActivity: open Launcher settings from here so Home rebuilds when they close. */
     static final String ACTION_LAUNCHER_SETTINGS = "com.gathin.tvhome.action.LAUNCHER_SETTINGS";
+    /** Sent by the "library" action word of app_keys: open the App library over Home (needs app_library). */
+    static final String ACTION_APP_LIBRARY = "com.gathin.tvhome.action.APP_LIBRARY";
     /** The system input switcher, forwarded here by InputsRequestActivity while handle_view_inputs is on. */
     static final String ACTION_VIEW_INPUTS = "com.android.tv.action.VIEW_INPUTS";
     /** Tiles per row and dock slots (res/values/config.xml, columns). Set in onCreate. */
@@ -295,6 +297,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private AppLibraryDialog appLibrary;
     private boolean appLibrarySelection;
     private boolean libraryOkOpens;
+    /** library_excluded_apps: packages the App library catalogue never offers. */
+    private Set<String> libraryExcludedApps = Collections.emptySet();
     private boolean libraryFocusPending;
     private RecyclerView.OnScrollListener pendingFocusScroll;
 
@@ -394,6 +398,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         homeAppKeys = RemoteKeys.parseAppKeys(cfg.appKeys);
         appLibrarySelection = cfg.appLibrarySelection;
         libraryOkOpens = cfg.libraryOkOpens;
+        libraryExcludedApps = new HashSet<>(cfg.libraryExcludedApps);
         // restore_key_services: after a force stop, put back the remote's accessibility helpers that Android took
         // off the list (needs WRITE_SECURE_SETTINGS, granted by build-and-install with RESTORE_KEY_SERVICES=1).
         if (cfg.restoreKeyServices) ServiceRepair.restore(this);
@@ -841,7 +846,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                     .build(), vpnCallback);
         }
         // Not after recreate(): the launch intent survives it and would open the settings again.
-        if (savedInstanceState == null && !openLauncherSettingsIfAsked(getIntent())) openInputsIfAsked(getIntent());
+        if (savedInstanceState == null && !openLauncherSettingsIfAsked(getIntent()) && !openLibraryIfAsked(getIntent())) {
+            openInputsIfAsked(getIntent());
+        }
     }
 
     /**
@@ -902,6 +909,21 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     /**
+     * ACTION_APP_LIBRARY, sent by the "library" action word: open the App library once Home is on screen. The intent
+     * is replaced so a later recreate() does not open it again. With app_library off there is no library, so the
+     * press only brings Home forward.
+     */
+    private boolean openLibraryIfAsked(Intent intent) {
+        if (intent == null || !ACTION_APP_LIBRARY.equals(intent.getAction())) return false;
+        setIntent(new Intent(Intent.ACTION_MAIN));
+        if (!appLibraryEnabled) return true;
+        getWindow().getDecorView().post(() -> {
+            if (!isFinishing() && !isDestroyed()) onLibraryRequested();
+        });
+        return true;
+    }
+
+    /**
      * Home pressed while Home is already in front: singleTask delivers it here, then onResume runs.
      * Back to the top with the first dock tile focused, like the stock launcher. Back from an app
      * never comes this way, so returning to the app you left from is unchanged (#118).
@@ -910,6 +932,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         if (openLauncherSettingsIfAsked(intent)) return;
+        if (openLibraryIfAsked(intent)) return;
         if (openInputsIfAsked(intent)) return;
         if (intent == null || !intent.hasCategory(Intent.CATEGORY_HOME)) return;
         grid.scrollToPosition(0);
@@ -1620,7 +1643,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             grid.post(() -> {
                 if (libraryFocusPending && appLibrary == null && hasWindowFocus() && !isFinishing()) focusLibrary();
             });
-        });
+        }, libraryExcludedApps);
         openPopup = appLibrary.popup;
         appLibrary.show();
     }
@@ -2930,6 +2953,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
      *  does not have). Returns the number, -1 for a left-out input, or null when the input is not listed. */
     private Integer mappedSource(String inputId) {
         return InputSources.mapped(inputSources, inputId);
+    }
+
+    /** A tile configured with launch_actions "input:<id>" (config.xml): switch to that TV input directly,
+     *  the same path the Inputs menu's own rows use, instead of opening the input's owning app normally. */
+    @Override
+    public void onOpenInput(String inputId) {
+        openInput(inputId);
     }
 
     /** Switches to a passthrough input (HDMI, AV). An input mapped in `input_sources` is opened by sending
